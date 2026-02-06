@@ -164,7 +164,7 @@ function generateCourtSchedule(
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("setup");
-  const [numCourts, setNumCourts] = useState<number>(2); // Max courts configured (1-10)
+  const [numCourts, setNumCourts] = useState<number>(1); // Max courts configured (1-10)
   const [pointsPerMatch, setPointsPerMatch] = useState(21);
   const [totalRounds, setTotalRounds] = useState(10);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -415,6 +415,15 @@ export default function Home() {
     });
   }, [newName, newSkill, players, activeCourts, currentRoundPerCourt, totalRounds]);
 
+  const endSession = useCallback(() => {
+    setActiveCourts([]);
+    setSchedulePerCourt({});
+    setCurrentRoundPerCourt({});
+    setRoundScoresPerCourt({});
+    setMatchResults({});
+    setScreen("leaderboard");
+  }, []);
+
   const skipMatchAndRegenerate = useCallback((courtId: number) => {
     // Skip current round by advancing to next round, then regenerate from there
     const currentRound = currentRoundPerCourt[courtId] ?? 1;
@@ -491,6 +500,8 @@ export default function Home() {
   const allSittingOut = useMemo(() => {
     return players.filter((p) => !allPlayingThisRound.has(p.id)).map((p) => p.id);
   }, [players, allPlayingThisRound]);
+
+  const sessionActive = activeCourts.length > 0;
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
@@ -680,12 +691,21 @@ export default function Home() {
               disabled={!canStartSession}
               className="w-full rounded-xl bg-emerald-600 py-4 sm:py-4 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[52px]"
             >
-              Start session
+              {sessionActive ? "Update session" : "Start session"}
             </button>
-            {!canStartSession && (
+            {!canStartSession && !sessionActive && (
               <p className="text-center text-sm text-slate-400">
                 Add at least 4 players to start.
               </p>
+            )}
+            {sessionActive && (
+              <button
+                type="button"
+                onClick={endSession}
+                className="w-full rounded-xl bg-slate-700 py-3 mt-2 text-sm font-medium text-slate-200 hover:bg-slate-600 touch-manipulation min-h-[44px]"
+              >
+                End session
+              </button>
             )}
           </div>
         )}
@@ -693,57 +713,7 @@ export default function Home() {
         {/* --- Session Screen --- */}
         {screen === "session" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between flex-wrap gap-2">
-              <div className="flex items-center gap-3 flex-wrap">
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-slate-500">Pts/match</label>
-                  <button
-                    type="button"
-                    onClick={() => setPointsPerMatch(Math.max(1, pointsPerMatch - 1))}
-                    disabled={pointsPerMatch === 1}
-                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xl font-bold flex items-center justify-center select-none touch-manipulation"
-                    aria-label="Decrease points per match"
-                  >
-                    −
-                  </button>
-                  <div className="w-12 rounded-lg bg-slate-700 px-2 py-1 text-center text-sm font-semibold text-white border border-slate-600">
-                    {pointsPerMatch}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setPointsPerMatch(Math.min(64, pointsPerMatch + 1))}
-                    disabled={pointsPerMatch === 64}
-                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold flex items-center justify-center select-none touch-manipulation"
-                    aria-label="Increase points per match"
-                  >
-                    +
-                  </button>
-                </div>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-slate-500">Rounds</label>
-                  <button
-                    type="button"
-                    onClick={() => setTotalRounds(Math.max(1, totalRounds - 1))}
-                    disabled={totalRounds === 1}
-                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xl font-bold flex items-center justify-center select-none touch-manipulation"
-                    aria-label="Decrease number of rounds"
-                  >
-                    −
-                  </button>
-                  <div className="w-12 rounded-lg bg-slate-700 px-2 py-1 text-center text-sm font-semibold text-white border border-slate-600">
-                    {totalRounds}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setTotalRounds(Math.min(99, totalRounds + 1))}
-                    disabled={totalRounds === 99}
-                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold flex items-center justify-center select-none touch-manipulation"
-                    aria-label="Increase number of rounds"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
+            <div className="flex items-center justify-end flex-wrap gap-2">
               <div className="flex gap-2">
                 <button
                   type="button"
@@ -1215,7 +1185,9 @@ export default function Home() {
                   </tr>
                 </thead>
                 <tbody>
-                  {leaderboardSorted.map((p, i) => (
+                  {leaderboardSorted.map((p, i) => {
+                    const medal = i === 0 ? "🥇 " : i === 1 ? "🥈 " : i === 2 ? "🥉 " : "";
+                    return (
                     <tr
                       key={p.id}
                       className={`border-t border-slate-700/50 ${i < 3 ? "bg-slate-800/40" : ""}`}
@@ -1223,7 +1195,10 @@ export default function Home() {
                       <td className="py-3 pl-4 font-bold text-slate-400 w-10">
                         {i + 1}
                       </td>
-                      <td className="py-3 font-medium text-white">{p.name}</td>
+                      <td className="py-3 font-medium text-white">
+                        {medal}
+                        {p.name}
+                      </td>
                       <td className="py-3 text-center text-slate-300">{p.gamesPlayed}</td>
                       <td className="py-3 text-right pr-4 font-semibold text-emerald-400">
                         {p.totalPoints}
@@ -1231,7 +1206,8 @@ export default function Home() {
                       <td className="py-3 text-center text-green-400/90">{p.wins}</td>
                       <td className="py-3 text-center text-red-400/80">{p.losses}</td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
