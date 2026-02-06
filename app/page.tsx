@@ -165,6 +165,7 @@ function generateCourtSchedule(
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [numCourts, setNumCourts] = useState<number>(1); // Max courts configured (1-10)
+  const [matchingAlgorithm, setMatchingAlgorithm] = useState<\"balanced\" | \"random\" | \"king\">(\"balanced\");
   const [pointsPerMatch, setPointsPerMatch] = useState(21);
   const [totalRounds, setTotalRounds] = useState(10);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -576,6 +577,54 @@ export default function Home() {
             </section>
 
             <section className="rounded-2xl bg-slate-800/50 p-4">
+              <h2 className="text-sm font-semibold text-slate-300 mb-3">Matching Algorithm</h2>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMatchingAlgorithm("balanced")}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                    matchingAlgorithm === "balanced"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
+                      : "border-slate-700 bg-slate-800 text-slate-200"
+                  }`}
+                >
+                  <div className="font-semibold">Balanced</div>
+                  <p className="text-xs text-slate-400">
+                    Balance skill levels across teams for fair matchups.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchingAlgorithm("random")}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                    matchingAlgorithm === "random"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
+                      : "border-slate-700 bg-slate-800 text-slate-200"
+                  }`}
+                >
+                  <div className="font-semibold">Random</div>
+                  <p className="text-xs text-slate-400">
+                    Fully randomized matchups, ignoring skill ratings.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchingAlgorithm("king")}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                    matchingAlgorithm === "king"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
+                      : "border-slate-700 bg-slate-800 text-slate-200"
+                  }`}
+                >
+                  <div className="font-semibold">King of the Court</div>
+                  <p className="text-xs text-slate-400">
+                    Winning team stays on court; losing team rotates off.
+                  </p>
+                </button>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-slate-800/50 p-4">
               <h2 className="text-sm font-semibold text-slate-300 mb-3">Points per match</h2>
               <div className="flex items-center gap-2">
                 <button
@@ -656,10 +705,10 @@ export default function Home() {
                 </select>
                 <button
                   type="button"
-                  onClick={addPlayer}
+                  onClick={sessionActive ? addLateArrival : addPlayer}
                   className="rounded-xl bg-emerald-600 px-4 py-3 sm:py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px] sm:min-h-0"
                 >
-                  Add
+                  Add Player
                 </button>
               </div>
               <ul className="space-y-2">
@@ -670,7 +719,10 @@ export default function Home() {
                   >
                     <span className="font-medium">{p.name}</span>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400">Skill {p.skill}</span>
+                      <span className="text-xs text-slate-400">
+                        {p.skill}
+                        <span className="text-[10px] text-emerald-400 align-super ml-1">skill</span>
+                      </span>
                       <button
                         type="button"
                         onClick={() => removePlayer(p.id)}
@@ -987,36 +1039,6 @@ export default function Home() {
                     </p>
                   </section>
                 )}
-
-            <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h3 className="text-sm font-semibold text-slate-300 mb-3">Add late arrival</h3>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addLateArrival()}
-                  className="flex-1 rounded-xl bg-slate-700 px-4 py-2.5 text-white placeholder-slate-500 border border-slate-600"
-                />
-                <select
-                  value={newSkill}
-                  onChange={(e) => setNewSkill(Number(e.target.value))}
-                  className="rounded-xl bg-slate-700 px-3 py-2.5 text-white border border-slate-600"
-                >
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={addLateArrival}
-                  className="rounded-xl bg-emerald-600 px-4 py-3 sm:py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px] sm:min-h-0"
-                >
-                  Add
-                </button>
-              </div>
-            </section>
 
             <p className="text-xs text-slate-500 text-center">
               Americano: each player gets their team&apos;s score as individual points.
