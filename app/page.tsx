@@ -30,6 +30,23 @@ type MatchResult = {
   teamAWon: boolean;
 };
 
+function getSkillLabel(skill: number): string {
+  switch (skill) {
+    case 1:
+      return "Beginner";
+    case 2:
+      return "Novice";
+    case 3:
+      return "Intermediate";
+    case 4:
+      return "Advanced";
+    case 5:
+      return "Expert";
+    default:
+      return "Beginner";
+  }
+}
+
 type Screen = "setup" | "session" | "leaderboard" | "schedule";
 
 function generateId(): string {
@@ -165,7 +182,7 @@ function generateCourtSchedule(
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("setup");
   const [numCourts, setNumCourts] = useState<number>(1); // Max courts configured (1-10)
-  const [matchingAlgorithm, setMatchingAlgorithm] = useState<\"balanced\" | \"random\" | \"king\">(\"balanced\");
+  const [matchingAlgorithm, setMatchingAlgorithm] = useState<"balanced" | "random" | "king">("balanced");
   const [pointsPerMatch, setPointsPerMatch] = useState(21);
   const [totalRounds, setTotalRounds] = useState(10);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -195,12 +212,14 @@ export default function Home() {
     if (!name) return;
     setPlayers((prev) => {
       const uniqueName = getUniquePlayerName(name, prev);
+      // Use skill 3 if algorithm is not "balanced", otherwise use selected skill
+      const skillToUse = matchingAlgorithm === "balanced" ? Math.min(5, Math.max(1, newSkill)) : 3;
       return [
         ...prev,
         {
           id: generateId(),
           name: uniqueName,
-          skill: Math.min(5, Math.max(1, newSkill)),
+          skill: skillToUse,
           gamesPlayed: 0,
           totalPoints: 0,
           wins: 0,
@@ -209,12 +228,62 @@ export default function Home() {
       ];
     });
     setNewName("");
-    setNewSkill(3);
-  }, [newName, newSkill]);
+    setNewSkill(1);
+  }, [newName, newSkill, matchingAlgorithm]);
 
-  const removePlayer = useCallback((id: string) => {
-    setPlayers((prev) => prev.filter((p) => p.id !== id));
-  }, []);
+  const removePlayer = useCallback(
+    (id: string) => {
+      setPlayers((prevPlayers) => {
+        const updatedPlayers = prevPlayers.filter((p) => p.id !== id);
+
+        // If no session is active yet, just update the list
+        if (activeCourts.length === 0) {
+          return updatedPlayers;
+        }
+
+        // Session is active: regenerate only future unplayed rounds per court
+        setSchedulePerCourt((prevSchedule) => {
+          const updatedSchedule: Record<number, RoundSchedule[]> = {};
+
+          activeCourts.forEach((courtId) => {
+            const currentRound = currentRoundPerCourt[courtId] ?? 1; // next round number (1-based)
+            const fromIndex = Math.max(0, currentRound - 1); // index of next unplayed round
+            const previousRounds = prevSchedule[courtId]?.slice(0, fromIndex) ?? [];
+
+            // Reassign players across courts (simple round-robin) based on updatedPlayers
+            const playersPerCourt: Record<number, Set<string>> = {};
+            activeCourts.forEach((cId) => {
+              playersPerCourt[cId] = new Set<string>();
+            });
+            let courtIndex = 0;
+            updatedPlayers.forEach((p) => {
+              const cId = activeCourts[courtIndex % activeCourts.length];
+              playersPerCourt[cId].add(p.id);
+              courtIndex++;
+            });
+
+            const targetRounds = Math.max(prevSchedule[courtId]?.length ?? 0, totalRounds);
+            const newFutureRounds = generateCourtSchedule(
+              updatedPlayers,
+              courtId,
+              targetRounds,
+              fromIndex,
+              previousRounds,
+              playersPerCourt[courtId]
+            );
+
+            updatedSchedule[courtId] = [...previousRounds, ...newFutureRounds];
+          });
+
+          return { ...prevSchedule, ...updatedSchedule };
+        });
+
+        // Past results and matchResults are untouched
+        return updatedPlayers;
+      });
+    },
+    [activeCourts, currentRoundPerCourt, totalRounds]
+  );
 
   const startSession = useCallback(() => {
     const maxPossibleCourts = Math.floor(players.length / 4);
@@ -368,10 +437,12 @@ export default function Home() {
     const name = newName.trim();
     if (!name) return;
     const uniqueName = getUniquePlayerName(name, players);
+    // Use skill 3 if algorithm is not "balanced", otherwise use selected skill
+    const skillToUse = matchingAlgorithm === "balanced" ? Math.min(5, Math.max(1, newSkill)) : 3;
     const newPlayer: Player = {
       id: generateId(),
       name: uniqueName,
-      skill: Math.min(5, Math.max(1, newSkill)),
+      skill: skillToUse,
       gamesPlayed: 0,
       totalPoints: 0,
       wins: 0,
@@ -380,16 +451,16 @@ export default function Home() {
     const updatedPlayers = [...players, newPlayer];
     setPlayers(updatedPlayers);
     setNewName("");
-    setNewSkill(3);
+    setNewSkill(1);
 
-    // Regenerate future rounds for all active courts
+    // Regenerate future rounds for all active courts (keep all played rounds)
     setSchedulePerCourt((prev) => {
       const updated: Record<number, RoundSchedule[]> = {};
       activeCourts.forEach((courtId) => {
-        const currentRound = currentRoundPerCourt[courtId] ?? 1;
-        const fromIndex = currentRound; // Regenerate from next round
+        const currentRound = currentRoundPerCourt[courtId] ?? 1; // next round number (1-based)
+        const fromIndex = Math.max(0, currentRound - 1); // index of next unplayed round
         const previousRounds = prev[courtId]?.slice(0, fromIndex) ?? [];
-        
+
         // Reassign players to courts
         const playersPerCourt: Record<number, Set<string>> = {};
         activeCourts.forEach((cId) => {
@@ -402,10 +473,11 @@ export default function Home() {
           courtIndex++;
         });
         
+        const targetRounds = Math.max(prev[courtId]?.length ?? 0, totalRounds);
         const newFutureRounds = generateCourtSchedule(
           updatedPlayers,
           courtId,
-          Math.max(prev[courtId]?.length ?? 0, totalRounds),
+          targetRounds,
           fromIndex,
           previousRounds,
           playersPerCourt[courtId]
@@ -414,7 +486,7 @@ export default function Home() {
       });
       return { ...prev, ...updated };
     });
-  }, [newName, newSkill, players, activeCourts, currentRoundPerCourt, totalRounds]);
+  }, [newName, newSkill, players, activeCourts, currentRoundPerCourt, totalRounds, matchingAlgorithm]);
 
   const endSession = useCallback(() => {
     setActiveCourts([]);
@@ -577,54 +649,6 @@ export default function Home() {
             </section>
 
             <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h2 className="text-sm font-semibold text-slate-300 mb-3">Matching Algorithm</h2>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMatchingAlgorithm("balanced")}
-                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
-                    matchingAlgorithm === "balanced"
-                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
-                      : "border-slate-700 bg-slate-800 text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">Balanced</div>
-                  <p className="text-xs text-slate-400">
-                    Balance skill levels across teams for fair matchups.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMatchingAlgorithm("random")}
-                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
-                    matchingAlgorithm === "random"
-                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
-                      : "border-slate-700 bg-slate-800 text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">Random</div>
-                  <p className="text-xs text-slate-400">
-                    Fully randomized matchups, ignoring skill ratings.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMatchingAlgorithm("king")}
-                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
-                    matchingAlgorithm === "king"
-                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
-                      : "border-slate-700 bg-slate-800 text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">King of the Court</div>
-                  <p className="text-xs text-slate-400">
-                    Winning team stays on court; losing team rotates off.
-                  </p>
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-800/50 p-4">
               <h2 className="text-sm font-semibold text-slate-300 mb-3">Points per match</h2>
               <div className="flex items-center gap-2">
                 <button
@@ -680,36 +704,98 @@ export default function Home() {
             </section>
 
             <section className="rounded-2xl bg-slate-800/50 p-4">
+              <h2 className="text-sm font-semibold text-slate-300 mb-3">Matching Algorithm</h2>
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMatchingAlgorithm("balanced")}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                    matchingAlgorithm === "balanced"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
+                      : "border-slate-700 bg-slate-800 text-slate-200"
+                  }`}
+                >
+                  <div className="font-semibold">Balanced</div>
+                  <p className="text-xs text-slate-400">
+                    Balance skill levels across teams for fair matchups.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchingAlgorithm("random")}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                    matchingAlgorithm === "random"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
+                      : "border-slate-700 bg-slate-800 text-slate-200"
+                  }`}
+                >
+                  <div className="font-semibold">Random</div>
+                  <p className="text-xs text-slate-400">
+                    Fully randomized matchups, ignoring skill ratings.
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMatchingAlgorithm("king")}
+                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                    matchingAlgorithm === "king"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
+                      : "border-slate-700 bg-slate-800 text-slate-200"
+                  }`}
+                >
+                  <div className="font-semibold">King of the Court</div>
+                  <p className="text-xs text-slate-400">
+                    Winning team stays on court; losing team rotates off.
+                  </p>
+                </button>
+              </div>
+            </section>
+
+            <section className="rounded-2xl bg-slate-800/50 p-4">
               <h2 className="text-sm font-semibold text-slate-300 mb-3">Players</h2>
               <p className="text-xs text-slate-400 mb-3">
                 Need at least 4 to start. You can add more during the session.
               </p>
-              <div className="flex gap-2 mb-4">
-                <input
-                  type="text"
-                  placeholder="Name"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addPlayer()}
-                  className="flex-1 rounded-xl bg-slate-700 px-4 py-2.5 text-white placeholder-slate-500 border border-slate-600 focus:border-emerald-500 outline-none"
-                />
-                <select
-                  value={newSkill}
-                  onChange={(e) => setNewSkill(Number(e.target.value))}
-                  className="rounded-xl bg-slate-700 px-3 py-2.5 text-white border border-slate-600 focus:border-emerald-500 outline-none"
-                  title="Skill 1-5"
-                >
-                  {[1, 2, 3, 4, 5].map((s) => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={sessionActive ? addLateArrival : addPlayer}
-                  className="rounded-xl bg-emerald-600 px-4 py-3 sm:py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px] sm:min-h-0"
-                >
-                  Add Player
-                </button>
+              <div className="flex flex-col gap-3 mb-4">
+                {matchingAlgorithm === "balanced" && (
+                  <div className="w-full flex flex-col items-center">
+                    <div className="flex justify-center gap-1">
+                      {[1, 2, 3, 4, 5].map((star) => (
+                        <button
+                          key={star}
+                          type="button"
+                          onClick={() => setNewSkill(star)}
+                          className="w-10 h-10 flex items-center justify-center text-2xl select-none touch-manipulation"
+                          aria-label={`Set skill to ${getSkillLabel(star)}`}
+                        >
+                          <span className={star <= newSkill ? "text-emerald-400" : "text-slate-500"}>
+                            ★
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                    <span className="mt-1 text-[11px] text-emerald-400 leading-none">
+                      {getSkillLabel(newSkill)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Name"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && addPlayer()}
+                    className="flex-1 rounded-xl bg-slate-700 px-4 py-2.5 text-white placeholder-slate-500 border border-slate-600 focus:border-emerald-500 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={sessionActive ? addLateArrival : addPlayer}
+                    className="rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px]"
+                  >
+                    Add
+                  </button>
+                </div>
               </div>
               <ul className="space-y-2">
                 {players.map((p) => (
@@ -718,16 +804,17 @@ export default function Home() {
                     className="flex items-center justify-between rounded-xl bg-slate-700/80 px-4 py-2.5"
                   >
                     <span className="font-medium">{p.name}</span>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-400">
-                        {p.skill}
-                        <span className="text-[10px] text-emerald-400 align-super ml-1">skill</span>
-                      </span>
+                    <div className="flex items-center gap-3">
+                      {matchingAlgorithm === "balanced" && (
+                        <span className="inline-flex items-center rounded-full bg-emerald-900/40 border border-emerald-500/60 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
+                          {getSkillLabel(p.skill)}
+                        </span>
+                      )}
                       <button
                         type="button"
                         onClick={() => removePlayer(p.id)}
-                        className="text-slate-400 hover:text-red-400 text-sm"
-                        aria-label="Remove"
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-semibold"
+                        aria-label={`Remove ${p.name}`}
                       >
                         ×
                       </button>
@@ -765,25 +852,6 @@ export default function Home() {
         {/* --- Session Screen --- */}
         {screen === "session" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-end flex-wrap gap-2">
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => setScreen("schedule")}
-                  className="text-sm text-emerald-400 hover:underline"
-                >
-                  Schedule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScreen("leaderboard")}
-                  className="text-sm text-emerald-400 hover:underline"
-                >
-                  Leaderboard
-                </button>
-              </div>
-            </div>
-
             {activeCourts.length === 0 ? (
               <div className="rounded-2xl bg-slate-800/50 p-6 text-center text-slate-400">
                 No active courts. Start a session from Setup.
@@ -810,6 +878,7 @@ export default function Home() {
                   const scoreB = scores?.scoreB ?? 0;
                   const totalScore = scoreA + scoreB;
                   const isMatchComplete = totalScore === pointsPerMatch && totalScore > 0;
+                  const canIncrease = totalScore < pointsPerMatch;
                   const teamAWon = scoreA > scoreB;
                   const canConfirm = scores && (scoreA > 0 || scoreB > 0);
 
@@ -846,8 +915,7 @@ export default function Home() {
                                   };
                                 })
                               }
-                              disabled={isMatchComplete}
-                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Subtract 1 point for Team A"
                             >
                               −
@@ -858,7 +926,6 @@ export default function Home() {
                               max={pointsPerMatch}
                               placeholder="0"
                               value={scores?.scoreA ?? ""}
-                              disabled={isMatchComplete}
                               onChange={(e) =>
                                 setRoundScoresPerCourt((prev) => {
                                   const courtScores = prev[courtId] ?? {};
@@ -868,14 +935,18 @@ export default function Home() {
                                       ...courtScores,
                                       [roundIndex]: {
                                         ...courtScores[roundIndex],
-                                        scoreA: Math.max(0, Math.min(pointsPerMatch, Number(e.target.value) || 0)),
+                                        scoreA: (() => {
+                                          const raw = Math.max(0, Math.min(pointsPerMatch, Number(e.target.value) || 0));
+                                          const currentB = courtScores[roundIndex]?.scoreB ?? 0;
+                                          return Math.min(raw, Math.max(0, pointsPerMatch - currentB));
+                                        })(),
                                         scoreB: courtScores[roundIndex]?.scoreB ?? 0,
                                       },
                                     },
                                   };
                                 })
                               }
-                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <button
                               type="button"
@@ -883,6 +954,9 @@ export default function Home() {
                                 setRoundScoresPerCourt((prev) => {
                                   const courtScores = prev[courtId] ?? {};
                                   const roundScores = courtScores[roundIndex] ?? { scoreA: 0, scoreB: 0 };
+                                  if (roundScores.scoreA + roundScores.scoreB >= pointsPerMatch) {
+                                    return prev;
+                                  }
                                   return {
                                     ...prev,
                                     [courtId]: {
@@ -895,7 +969,7 @@ export default function Home() {
                                   };
                                 })
                               }
-                              disabled={isMatchComplete}
+                              disabled={!canIncrease}
                               className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Add 1 point for Team A"
                             >
@@ -927,8 +1001,7 @@ export default function Home() {
                                   };
                                 })
                               }
-                              disabled={isMatchComplete}
-                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Subtract 1 point for Team B"
                             >
                               −
@@ -939,7 +1012,6 @@ export default function Home() {
                               max={pointsPerMatch}
                               placeholder="0"
                               value={scores?.scoreB ?? ""}
-                              disabled={isMatchComplete}
                               onChange={(e) =>
                                 setRoundScoresPerCourt((prev) => {
                                   const courtScores = prev[courtId] ?? {};
@@ -950,13 +1022,17 @@ export default function Home() {
                                       [roundIndex]: {
                                         ...courtScores[roundIndex],
                                         scoreA: courtScores[roundIndex]?.scoreA ?? 0,
-                                        scoreB: Math.max(0, Math.min(pointsPerMatch, Number(e.target.value) || 0)),
+                                        scoreB: (() => {
+                                          const raw = Math.max(0, Math.min(pointsPerMatch, Number(e.target.value) || 0));
+                                          const currentA = courtScores[roundIndex]?.scoreA ?? 0;
+                                          return Math.min(raw, Math.max(0, pointsPerMatch - currentA));
+                                        })(),
                                       },
                                     },
                                   };
                                 })
                               }
-                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <button
                               type="button"
@@ -964,6 +1040,9 @@ export default function Home() {
                                 setRoundScoresPerCourt((prev) => {
                                   const courtScores = prev[courtId] ?? {};
                                   const roundScores = courtScores[roundIndex] ?? { scoreA: 0, scoreB: 0 };
+                                  if (roundScores.scoreA + roundScores.scoreB >= pointsPerMatch) {
+                                    return prev;
+                                  }
                                   return {
                                     ...prev,
                                     [courtId]: {
@@ -976,7 +1055,7 @@ export default function Home() {
                                   };
                                 })
                               }
-                              disabled={isMatchComplete}
+                              disabled={!canIncrease}
                               className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Add 1 point for Team B"
                             >
