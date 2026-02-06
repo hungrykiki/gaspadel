@@ -24,6 +24,12 @@ type RoundSchedule = {
   sittingOut: string[];
 };
 
+type MatchResult = {
+  scoreA: number;
+  scoreB: number;
+  teamAWon: boolean;
+};
+
 type Screen = "setup" | "session" | "leaderboard" | "schedule";
 
 function generateId(): string {
@@ -175,6 +181,11 @@ export default function Home() {
     Record<number, Record<number, { scoreA: number; scoreB: number }>>
   >({});
 
+  // Match results: courtId -> roundIndex -> MatchResult
+  const [matchResults, setMatchResults] = useState<
+    Record<number, Record<number, MatchResult>>
+  >({});
+
   // Schedule filter
   const [scheduleFilterCourts, setScheduleFilterCourts] = useState<Set<number>>(new Set());
 
@@ -316,6 +327,15 @@ export default function Home() {
     const teamAWon = scoreA > scoreB;
     const winScore = teamAWon ? scoreA : scoreB;
     const loseScore = teamAWon ? scoreB : scoreA;
+
+    // Store match result
+    setMatchResults((prev) => ({
+      ...prev,
+      [courtId]: {
+        ...prev[courtId],
+        [roundIndex]: { scoreA, scoreB, teamAWon },
+      },
+    }));
 
     setPlayers((prev) => {
       const updated = prev.map((p) => ({ ...p }));
@@ -474,17 +494,17 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
-      <div className="mx-auto max-w-lg px-4 py-6 pb-24 safe-area-pb">
-        <h1 className="text-2xl font-bold tracking-tight text-emerald-400 mb-6">
+      <div className="mx-auto max-w-lg px-3 sm:px-4 py-4 sm:py-6 pb-20 sm:pb-24 safe-area-pb">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-400 mb-4 sm:mb-6">
           gaspadel
         </h1>
 
         {/* Tab nav */}
-        <nav className="flex gap-1 mb-6 rounded-xl bg-slate-800/60 p-1 overflow-x-auto">
+        <nav className="flex gap-1 mb-4 sm:mb-6 rounded-xl bg-slate-800/60 p-1 overflow-x-auto">
           <button
             type="button"
             onClick={() => setScreen("setup")}
-            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "setup" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+            className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${screen === "setup" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
           >
             Setup
           </button>
@@ -524,7 +544,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setNumCourts(Math.max(1, numCourts - 1))}
                   disabled={numCourts === 1}
-                  className="flex-shrink-0 w-14 h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                   aria-label="Decrease max courts"
                 >
                   −
@@ -536,7 +556,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setNumCourts(Math.min(10, numCourts + 1))}
                   disabled={numCourts === 10}
-                  className="flex-shrink-0 w-14 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                   aria-label="Increase max courts"
                 >
                   +
@@ -551,7 +571,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setPointsPerMatch(Math.max(1, pointsPerMatch - 1))}
                   disabled={pointsPerMatch === 1}
-                  className="flex-shrink-0 w-14 h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                   aria-label="Decrease points per match"
                 >
                   −
@@ -563,7 +583,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setPointsPerMatch(Math.min(64, pointsPerMatch + 1))}
                   disabled={pointsPerMatch === 64}
-                  className="flex-shrink-0 w-14 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                   aria-label="Increase points per match"
                 >
                   +
@@ -579,7 +599,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setTotalRounds(Math.max(1, totalRounds - 1))}
                   disabled={totalRounds === 1}
-                  className="flex-shrink-0 w-14 h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                   aria-label="Decrease number of rounds"
                 >
                   −
@@ -591,7 +611,7 @@ export default function Home() {
                   type="button"
                   onClick={() => setTotalRounds(Math.min(99, totalRounds + 1))}
                   disabled={totalRounds === 99}
-                  className="flex-shrink-0 w-14 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                   aria-label="Increase number of rounds"
                 >
                   +
@@ -626,7 +646,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={addPlayer}
-                  className="rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500"
+                  className="rounded-xl bg-emerald-600 px-4 py-3 sm:py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px] sm:min-h-0"
                 >
                   Add
                 </button>
@@ -658,7 +678,7 @@ export default function Home() {
               type="button"
               onClick={startSession}
               disabled={!canStartSession}
-              className="w-full rounded-xl bg-emerald-600 py-4 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full rounded-xl bg-emerald-600 py-4 sm:py-4 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[52px]"
             >
               Start session
             </button>
@@ -681,7 +701,7 @@ export default function Home() {
                     type="button"
                     onClick={() => setPointsPerMatch(Math.max(1, pointsPerMatch - 1))}
                     disabled={pointsPerMatch === 1}
-                    className="flex-shrink-0 w-10 h-10 rounded-lg bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xl font-bold flex items-center justify-center select-none touch-manipulation"
+                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xl font-bold flex items-center justify-center select-none touch-manipulation"
                     aria-label="Decrease points per match"
                   >
                     −
@@ -693,7 +713,7 @@ export default function Home() {
                     type="button"
                     onClick={() => setPointsPerMatch(Math.min(64, pointsPerMatch + 1))}
                     disabled={pointsPerMatch === 64}
-                    className="flex-shrink-0 w-10 h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold flex items-center justify-center select-none touch-manipulation"
+                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold flex items-center justify-center select-none touch-manipulation"
                     aria-label="Increase points per match"
                   >
                     +
@@ -705,7 +725,7 @@ export default function Home() {
                     type="button"
                     onClick={() => setTotalRounds(Math.max(1, totalRounds - 1))}
                     disabled={totalRounds === 1}
-                    className="flex-shrink-0 w-10 h-10 rounded-lg bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xl font-bold flex items-center justify-center select-none touch-manipulation"
+                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-xl font-bold flex items-center justify-center select-none touch-manipulation"
                     aria-label="Decrease number of rounds"
                   >
                     −
@@ -717,7 +737,7 @@ export default function Home() {
                     type="button"
                     onClick={() => setTotalRounds(Math.min(99, totalRounds + 1))}
                     disabled={totalRounds === 99}
-                    className="flex-shrink-0 w-10 h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold flex items-center justify-center select-none touch-manipulation"
+                    className="flex-shrink-0 w-12 h-12 sm:w-10 sm:h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold flex items-center justify-center select-none touch-manipulation"
                     aria-label="Increase number of rounds"
                   >
                     +
@@ -764,18 +784,23 @@ export default function Home() {
                     );
                   }
 
-                  const canConfirm = scores && (scores.scoreA > 0 || scores.scoreB > 0);
+                  const scoreA = scores?.scoreA ?? 0;
+                  const scoreB = scores?.scoreB ?? 0;
+                  const totalScore = scoreA + scoreB;
+                  const isMatchComplete = totalScore === pointsPerMatch && totalScore > 0;
+                  const teamAWon = scoreA > scoreB;
+                  const canConfirm = scores && (scoreA > 0 || scoreB > 0);
 
                   return (
-                    <section key={courtId} className="rounded-2xl bg-slate-800/50 p-4 border border-slate-700/50">
-                      <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold text-emerald-400/90">Court {courtId}</h3>
-                        <span className="text-xs text-slate-500">
+                    <section key={courtId} className="rounded-2xl bg-slate-800/50 p-4 sm:p-5 border border-slate-700/50">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                        <h3 className="text-base sm:text-sm font-semibold text-emerald-400/90">Court {courtId}</h3>
+                        <span className="text-sm sm:text-xs text-slate-500">
                           Round {currentRoundPerCourt[courtId] ?? 1}
                         </span>
                       </div>
-                      <div className="grid grid-cols-2 gap-4 items-start mb-4">
-                        <div className="flex flex-col gap-2">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-4 items-start mb-4">
+                        <div className={`flex flex-col gap-2 p-3 rounded-xl transition ${isMatchComplete && teamAWon ? "bg-emerald-950/40 border-2 border-emerald-500" : ""}`}>
                           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Team A</p>
                           <p className="font-medium text-slate-100 text-sm leading-tight">
                             {matchup.teamA.map((id) => getPlayer(id)?.name).join(" & ")}
@@ -799,7 +824,8 @@ export default function Home() {
                                   };
                                 })
                               }
-                              className="flex-shrink-0 w-14 h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                              disabled={isMatchComplete}
+                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Subtract 1 point for Team A"
                             >
                               −
@@ -810,6 +836,7 @@ export default function Home() {
                               max={pointsPerMatch}
                               placeholder="0"
                               value={scores?.scoreA ?? ""}
+                              disabled={isMatchComplete}
                               onChange={(e) =>
                                 setRoundScoresPerCourt((prev) => {
                                   const courtScores = prev[courtId] ?? {};
@@ -826,7 +853,7 @@ export default function Home() {
                                   };
                                 })
                               }
-                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <button
                               type="button"
@@ -846,14 +873,15 @@ export default function Home() {
                                   };
                                 })
                               }
-                              className="flex-shrink-0 w-14 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                              disabled={isMatchComplete}
+                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Add 1 point for Team A"
                             >
                               +
                             </button>
                           </div>
                         </div>
-                        <div className="flex flex-col gap-2">
+                        <div className={`flex flex-col gap-2 p-3 rounded-xl transition ${isMatchComplete && !teamAWon ? "bg-emerald-950/40 border-2 border-emerald-500" : ""}`}>
                           <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Team B</p>
                           <p className="font-medium text-slate-100 text-sm leading-tight">
                             {matchup.teamB.map((id) => getPlayer(id)?.name).join(" & ")}
@@ -877,7 +905,8 @@ export default function Home() {
                                   };
                                 })
                               }
-                              className="flex-shrink-0 w-14 h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                              disabled={isMatchComplete}
+                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Subtract 1 point for Team B"
                             >
                               −
@@ -888,6 +917,7 @@ export default function Home() {
                               max={pointsPerMatch}
                               placeholder="0"
                               value={scores?.scoreB ?? ""}
+                              disabled={isMatchComplete}
                               onChange={(e) =>
                                 setRoundScoresPerCourt((prev) => {
                                   const courtScores = prev[courtId] ?? {};
@@ -904,7 +934,7 @@ export default function Home() {
                                   };
                                 })
                               }
-                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none disabled:opacity-50 disabled:cursor-not-allowed [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                             <button
                               type="button"
@@ -924,7 +954,8 @@ export default function Home() {
                                   };
                                 })
                               }
-                              className="flex-shrink-0 w-14 h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                              disabled={isMatchComplete}
+                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
                               aria-label="Add 1 point for Team B"
                             >
                               +
@@ -933,18 +964,29 @@ export default function Home() {
                         </div>
                       </div>
                       <p className="text-xs text-slate-500 mb-3">Max {pointsPerMatch} points per team</p>
+                      {isMatchComplete && (
+                        <div className="mb-3 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/50">
+                          <p className="text-sm font-semibold text-emerald-400 text-center">
+                            🏆 {teamAWon ? "Team A wins!" : "Team B wins!"} ({scoreA}-{scoreB})
+                          </p>
+                        </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => handleConfirmCourtScore(courtId)}
                         disabled={!canConfirm}
-                        className="w-full rounded-xl bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="w-full rounded-xl bg-emerald-600 py-3.5 sm:py-2.5 text-base sm:text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[48px]"
                       >
-                        {hasMoreRounds ? `Confirm & next round (Court ${courtId})` : `Confirm (Court ${courtId} - final round)`}
+                        {isMatchComplete
+                          ? `Log Match (Court ${courtId})`
+                          : hasMoreRounds
+                          ? `Confirm & next round (Court ${courtId})`
+                          : `Confirm (Court ${courtId} - final round)`}
                       </button>
                       <button
                         type="button"
                         onClick={() => skipMatchAndRegenerate(courtId)}
-                        className="w-full rounded-xl bg-slate-700 py-2 text-sm text-slate-300 hover:bg-slate-600 mt-2"
+                        className="w-full rounded-xl bg-slate-700 py-3 sm:py-2 text-sm text-slate-300 hover:bg-slate-600 mt-2 touch-manipulation min-h-[44px]"
                       >
                         Skip match & regenerate (Court {courtId})
                       </button>
@@ -960,7 +1002,7 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={addCourt}
-                      className="w-full rounded-xl bg-emerald-600 py-2.5 font-semibold text-white hover:bg-emerald-500"
+                      className="w-full rounded-xl bg-emerald-600 py-3 sm:py-2.5 font-semibold text-white hover:bg-emerald-500 touch-manipulation min-h-[48px] sm:min-h-0"
                     >
                       Add Court {activeCourts.length + 1}
                     </button>
@@ -999,7 +1041,7 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={addLateArrival}
-                  className="rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500"
+                  className="rounded-xl bg-emerald-600 px-4 py-3 sm:py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px] sm:min-h-0"
                 >
                   Add
                 </button>
@@ -1029,11 +1071,11 @@ export default function Home() {
                   onClick={() => {
                     setScheduleFilterCourts(new Set());
                   }}
-                  className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
-                    scheduleFilterCourts.size === 0
-                      ? "bg-emerald-600 text-white"
-                      : "bg-slate-700 text-slate-300"
-                  }`}
+                    className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
+                      scheduleFilterCourts.size === 0
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-700 text-slate-300"
+                    }`}
                 >
                   All
                 </button>
@@ -1045,7 +1087,7 @@ export default function Home() {
                       // Clicking a court chip shows only that court
                       setScheduleFilterCourts(new Set([courtId]));
                     }}
-                    className={`rounded-full px-4 py-1.5 text-sm font-medium transition ${
+                    className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
                       scheduleFilterCourts.has(courtId)
                         ? "bg-emerald-600 text-white"
                         : "bg-slate-700 text-slate-300 opacity-50"
@@ -1095,6 +1137,8 @@ export default function Home() {
                               );
                             }
                             
+                            const matchResult = matchResults[courtId]?.[index];
+                            
                             return (
                               <section
                                 key={roundNum}
@@ -1111,14 +1155,32 @@ export default function Home() {
                                   {isCurrent && <span className="text-xs font-normal text-emerald-400">(current)</span>}
                                   {isPast && <span className="text-xs font-normal text-slate-500">(played)</span>}
                                 </h3>
-                                <div className="text-sm">
-                                  <span className="text-slate-300">
-                                    {roundData.matchup!.teamA.map((id) => getPlayer(id)?.name).join(" & ")}
-                                  </span>
-                                  <span className="text-slate-500 mx-2">vs</span>
-                                  <span className="text-slate-300">
-                                    {roundData.matchup!.teamB.map((id) => getPlayer(id)?.name).join(" & ")}
-                                  </span>
+                                <div className="text-sm space-y-2">
+                                  <div className={`flex flex-wrap items-center gap-2 ${matchResult && matchResult.teamAWon ? "text-emerald-400" : ""}`}>
+                                    <span className={`font-medium ${matchResult && matchResult.teamAWon ? "text-emerald-400" : "text-slate-300"}`}>
+                                      {roundData.matchup!.teamA.map((id) => getPlayer(id)?.name).join(" & ")}
+                                    </span>
+                                    <span className="text-slate-500">vs</span>
+                                    <span className={`font-medium ${matchResult && !matchResult.teamAWon ? "text-emerald-400" : "text-slate-300"}`}>
+                                      {roundData.matchup!.teamB.map((id) => getPlayer(id)?.name).join(" & ")}
+                                    </span>
+                                  </div>
+                                  {matchResult && (
+                                    <div className="pt-2 border-t border-slate-700/50">
+                                      <p className="text-base font-semibold">
+                                        <span className={matchResult.teamAWon ? "text-emerald-400" : "text-slate-400"}>
+                                          {matchResult.scoreA}
+                                        </span>
+                                        <span className="text-slate-500 mx-2">-</span>
+                                        <span className={!matchResult.teamAWon ? "text-emerald-400" : "text-slate-400"}>
+                                          {matchResult.scoreB}
+                                        </span>
+                                        <span className="text-slate-500 ml-2 text-sm font-normal">
+                                          ({matchResult.teamAWon ? "Team A wins" : "Team B wins"})
+                                        </span>
+                                      </p>
+                                    </div>
+                                  )}
                                 </div>
                                 {roundData.sittingOut.length > 0 && (
                                   <p className="text-xs text-slate-500 mt-2">
