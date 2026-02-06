@@ -6,6 +6,43 @@ import { generateSchedule, regenerateSchedule, getSkillLabel, getUniquePlayerNam
 
 type Screen = "setup" | "session" | "leaderboard" | "schedule";
 
+/** Shared header: logo + tab bar. Same on every tab; only the active pill changes. */
+function AppHeader({
+  screen,
+  setScreen,
+}: {
+  screen: Screen;
+  setScreen: (s: Screen) => void;
+}) {
+  const tabs: { id: Screen; label: string }[] = [
+    { id: "setup", label: "Setup" },
+    { id: "session", label: "Session" },
+    { id: "schedule", label: "Schedule" },
+    { id: "leaderboard", label: "Leaderboard" },
+  ];
+  return (
+    <header className="sticky top-0 z-30 bg-gray-50 border-b border-slate-200/80 pb-4 sm:pb-6">
+      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-600 mb-4 sm:mb-6 pt-4 sm:pt-6">
+        gaspadel
+      </h1>
+      <nav className="flex gap-1 rounded-xl bg-slate-200/80 p-1 overflow-x-auto">
+        {tabs.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setScreen(id)}
+            className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${
+              screen === id ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+    </header>
+  );
+}
+
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("setup");
   
@@ -316,47 +353,9 @@ export default function Home() {
   }, [config, sessionActive, players, schedule, currentRound, setConfig, setSchedule]);
 
   return (
-    <div className={`min-h-screen font-sans ${screen === "session" ? "bg-white" : "bg-gray-50 text-gray-900"}`}>
-      <div className={`mx-auto max-w-lg px-3 sm:px-4 py-4 sm:py-6 ${screen === "session" ? "" : "pb-20 sm:pb-24 safe-area-pb"}`}>
-        {screen !== "session" && (
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-600 mb-4 sm:mb-6">
-            gaspadel
-          </h1>
-        )}
-
-        {/* Tab nav */}
-        {screen !== "session" && (
-          <nav className="flex gap-1 mb-4 sm:mb-6 rounded-xl bg-slate-200/80 p-1 overflow-x-auto">
-          <button
-            type="button"
-            onClick={() => setScreen("setup")}
-            className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${screen === "setup" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
-          >
-            Setup
-          </button>
-          <button
-            type="button"
-            onClick={() => setScreen("session")}
-            className="flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 text-slate-600 hover:text-slate-900"
-          >
-            Session
-          </button>
-          <button
-            type="button"
-            onClick={() => setScreen("schedule")}
-            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "schedule" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
-          >
-            Schedule
-          </button>
-          <button
-            type="button"
-            onClick={() => setScreen("leaderboard")}
-            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "leaderboard" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
-          >
-            Leaderboard
-          </button>
-        </nav>
-        )}
+    <div className="min-h-screen font-sans bg-gray-50 text-gray-900">
+      <div className="mx-auto max-w-lg px-3 sm:px-4 pb-20 sm:pb-24 safe-area-pb">
+        <AppHeader screen={screen} setScreen={setScreen} />
 
         {/* --- Setup Screen --- */}
         {screen === "setup" && (
@@ -902,40 +901,7 @@ export default function Home() {
 
         {/* --- Session Screen --- */}
         {screen === "session" && (
-          <div className="min-h-screen bg-white">
-            {/* Tab nav for session screen */}
-            <nav className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 py-2">
-              <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-                <button
-                  type="button"
-                  onClick={() => setScreen("setup")}
-                  className="flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] text-gray-600 hover:text-gray-900"
-                >
-                  Setup
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScreen("session")}
-                  className="flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] bg-white text-gray-900 shadow-sm"
-                >
-                  Session
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScreen("schedule")}
-                  className="flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] text-gray-600 hover:text-gray-900"
-                >
-                  Schedule
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScreen("leaderboard")}
-                  className="flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] text-gray-600 hover:text-gray-900"
-                >
-                  Leaderboard
-                </button>
-              </div>
-            </nav>
+          <div className="pt-4 sm:pt-6">
             {!sessionActive ? (
               <div className="rounded-2xl bg-gray-100 p-6 text-center text-gray-600">
                 No active session. Start a session from Setup.
@@ -946,8 +912,8 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Header Bar */}
-                <div className="sticky top-[60px] z-10 bg-white border-b border-gray-200 px-4 py-3">
+                {/* Header Bar (sticky below shared AppHeader) */}
+                <div className="sticky top-[8.5rem] z-10 bg-gray-50 border-b border-slate-200 px-4 py-3">
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-3">
                       <h2 className="text-lg font-bold text-gray-900">Court {selectedCourt}</h2>
@@ -1168,22 +1134,31 @@ export default function Home() {
                             type="button"
                             onClick={() => {
                               if (!currentMatch || !currentRoundData) return;
-                              // Regenerate only current round's matchups
-                              const updatedPlayers = useStore.getState().players;
-                              const previousRounds = schedule.filter((r) => r.roundNumber < currentRound);
-                              const { matches, sittingOut } = generateRoundMatchups(
-                                updatedPlayers,
-                                config.courts,
-                                config.algorithm,
-                                previousRounds,
-                                currentRound
-                              );
-                              
-                              // Update only the current round
+                              const confirmed = window.confirm("Reshuffle with available players?");
+                              if (!confirmed) return;
+                              // Collect the 4 players on this court and randomize into new teams
+                              const ids = [
+                                ...currentMatch.teamA.playerIds,
+                                ...currentMatch.teamB.playerIds,
+                              ];
+                              if (ids.length !== 4) return;
+                              const shuffled = [...ids].sort(() => Math.random() - 0.5);
+                              const newMatch = {
+                                ...currentMatch,
+                                teamA: { playerIds: [shuffled[0], shuffled[1]] },
+                                teamB: { playerIds: [shuffled[2], shuffled[3]] },
+                                status: "upcoming" as const,
+                                score: undefined,
+                              };
                               setSchedule(
                                 schedule.map((round) =>
                                   round.roundNumber === currentRound
-                                    ? { ...round, matches, sittingOut }
+                                    ? {
+                                        ...round,
+                                        matches: round.matches.map((m) =>
+                                          m.court === selectedCourt ? newMatch : m
+                                        ),
+                                      }
                                     : round
                                 )
                               );
