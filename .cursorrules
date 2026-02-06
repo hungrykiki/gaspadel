@@ -3,3 +3,307 @@ Keep code simple and readable.
 Use functional components with hooks.
 Add brief comments explaining non-obvious logic.
 Prefer server components unless client interactivity is needed.
+
+Cursor Prompt: Rebuild Gaspadel — Padel Session Scorekeeping PWA
+Context
+You are rebuilding Gaspadel (gaspadel.vercel.app), a mobile-first PWA for organizing and scoring social padel sessions (Americano/Mexicano format). The current app has the right feature set but poor UX for its actual usage context: courtside, bright sunlight, sweaty hands, split attention, fast-paced play.
+Tech stack: Next.js 14 (App Router) + TypeScript + Tailwind CSS + Zustand for state. Deploy target: Vercel. No backend — all state is local (localStorage + optional URL-based session sharing).
+
+Core Mental Model
+
+A padel session is a living, evolving event. Players arrive late, leave early, and join mid-session. The app must handle this gracefully — the schedule regenerates, the leaderboard updates, and the organizer never has to stop the action.
+
+Players are NOT assigned to a fixed court. In Americano/Mexicano format, players rotate across ALL courts with different partners every round. A player might be on Court 1 in Round 1 with Partner A, then Court 2 in Round 2 with Partner B. The schedule algorithm manages this rotation — courts are just physical locations where matches happen, not player assignments.
+The 4 tabs — Setup, Session, Schedule, Leaderboard — are parallel views into the same live session, NOT sequential steps. An organizer should be able to:
+
+Start a session with 4 players
+Switch to Session tab to score Round 1
+Switch back to Setup to add 2 latecomers mid-round
+Check the Leaderboard between rounds
+All without interrupting the flow
+
+This is the #1 architectural principle: everything is live and mutable.
+
+Core User Story
+
+As a padel group organizer, I want to quickly set up a session, start play immediately, and seamlessly add late-arriving players throughout the session — so we never stop playing to deal with logistics.
+
+
+Screens to Build
+1. Setup Tab (Config + Live Player Management)
+This tab is used BEFORE and DURING the session. It is never "done."
+Config section (top, collapsible after session starts):
+
+Courts (1–4), Points per match (default 21, range 8–32, step of 1), Rounds (default 10, range 3–20)
+Use segmented controls or pill selectors for common values instead of +/– steppers
+Show a dynamic estimated session time based on config and current player count (e.g., "~75 min with 8 players on 2 courts")
+Include preset buttons: "Quick (6 rounds, 16pts)", "Standard (10 rounds, 21pts)", "Long (14 rounds, 32pts)"
+Config should be editable mid-session (e.g., adding more rounds). Show a warning: "Schedule will regenerate for remaining rounds."
+
+Matching algorithm:
+
+Three options: Balanced, Random, King of the Court
+Each with a one-line description
+Card-style radio selection with clear selected state
+
+Player roster (always visible, always editable):
+This is the living roster. It must support:
+
+Adding players at any time — before session starts, between rounds, or mid-round
+
+Name input + 5-star skill rating (with labels on all 5 levels: Beginner / Novice / Intermediate / Advanced / Pro)
+"Add" button or Enter key to submit
+New player added mid-session gets folded into the next round's matchmaking
+Show a badge: "Joining next round" on newly added players if a round is in progress
+
+
+Player list always visible below the input, showing:
+
+Name, skill stars, status (Playing / Waiting / Sitting out / New — joining next round)
+Swipe-to-remove or X button to remove a player (with confirmation if session is active)
+Tap to edit skill level inline
+Player count: "8 players (6 active, 2 waiting)"
+
+
+Sitting out / rotation: With odd numbers or too many players for available courts, some players sit out. The app should:
+
+Automatically rotate who sits out to ensure fairness
+Show a "sit out count" per player (visible on hover/tap)
+Allow manual override: organizer can tap a player to toggle "Sit out next round"
+
+
+Persist player roster in localStorage so returning users see their regular group and can quickly re-add them (show as "Recent players" suggestions)
+
+CTA:
+
+Before session: "Start Session →" (disabled until ≥4 players, with clearly disabled styling — gray, not green)
+During session: The start button is gone. Show a status banner instead: "Session active — Round 3 of 10"
+
+2. Session Tab (Scorekeeping) — THIS IS THE MOST CRITICAL SCREEN
+Design for courtside use: big, fast, forgiving.
+Layout: Split the screen into two large tap zones — top half = Team A, bottom half = Team B. Each zone shows:
+
+Team name (e.g., "Al & Mazaya") in bold
+Large score number (72px+ font)
+Tap anywhere in the zone to +1 point
+Small "−1" button in the corner for corrections
+
+Visual feedback:
+
+On tap: brief color flash + haptic feedback (navigator.vibrate(50) where supported)
+Score change animates (number rolls up/down)
+When a team reaches the point target, the winning zone pulses and a "Match Complete" overlay appears
+
+Header bar:
+
+"Round 3 of 10" with a slim progress bar
+Court indicator if multi-court (tabs or swipe between courts)
+Elapsed timer for current match (MM:SS)
+
+Multi-court support:
+
+If 2+ courts active, show court switcher at top (horizontally scrollable pills: "Court 1", "Court 2", etc.)
+Each court has its own independent score state
+Badge on court pills showing score status (e.g., "7-4" or "✓ done")
+
+Match completion flow:
+
+Auto-detect when combined score = max points OR one team hits the ceiling
+Show confirmation: "Al & Mazaya win 13–8. Confirm?" with Confirm / Edit Score options
+On confirm → show next matchup with transition. If other courts still playing, show "Waiting for Court 2..." state
+OR allow async: each court advances independently, next round starts per-court when ready
+
+Handling late arrivals during a round:
+
+If a player is added mid-round via Setup tab, show a non-intrusive toast on Session tab: "Kiki joined — will play next round"
+Do NOT disrupt the current round
+
+Safety & error recovery:
+
+"Undo last point" button always visible (small, bottom of screen)
+Undo stack: keep last 20 score actions
+"Reshuffle match" secondary CTA below the score zones — for when assigned players aren't ready (still resting, haven't arrived yet, etc.). Tapping it regenerates the current matchup with available players. Requires a single confirmation tap: "Reshuffle with available players?"
+Accidental tab switches should NOT lose score state
+
+3. Schedule Tab
+
+Show all rounds in a vertical timeline / list
+Each round shows: round number, all court assignments for that round (e.g., Court 1: Al & Mazaya vs Ubed & Kiki, Court 2: Dani & Riko vs Sam & Lia), plus who is sitting out
+Players can see their own path across rounds — which court they're on, who their partner is, who they're facing — all changing every round
+Completed rounds show final scores; tap to expand for detail
+Current round is highlighted / pinned at top
+Upcoming rounds may show "TBD" pairings if the algorithm regenerates based on new players or results
+"Round X of Y" context always visible
+If rounds are added mid-session (from Setup), new rounds appear at the bottom with a subtle "Added" indicator
+Optional: "My Schedule" view filtered to a single player, showing their partner/court/opponent per round
+
+4. Leaderboard Tab
+
+Ranked list of all players (including those who joined late — their stats reflect only rounds they played)
+Show: Rank, Name, Matches Played, Wins, Losses, Points Scored, Points Against, Net Points
+"Matches Played" is critical since not everyone plays the same number of rounds
+Sortable by tapping column headers (default: sort by wins, then net points)
+Highlight top 3 with podium styling (gold / silver / bronze accents)
+Players who joined late are NOT penalized — stats are per-match, not cumulative totals
+Show a "Share Results" button that generates a copyable text summary or screenshot
+
+
+Design System
+The #1 design constraint: readability in bright sunlight.
+
+Light theme by default with a dark theme toggle. Outdoor padel = sun. High contrast is non-negotiable.
+Font: Bold, high-legibility sans-serif. Scores: 72px+. All body text ≥16px minimum.
+Colors: Vibrant sports palette.
+
+Primary: deep green (#0D7C3E)
+Accent / Team B: bright coral (#FF6B4A)
+Background: near-white (#F8F9FA) in light mode
+Score tap zones use distinct, high-contrast team colors
+Tab bar: subtle but clear active state (filled green pill)
+
+
+Touch targets: Minimum 48px × 48px for all interactive elements. Score tap zones ~50% of viewport height each.
+Border radius: 12px for cards, 8px for buttons. Consistent everywhere.
+Animations: Functional only — score transitions, progress bar, tap feedback, toast entrances. Zero decorative animation. Speed > beauty.
+
+
+Key Interactions & Edge Cases
+Adding a player mid-session:
+
+Organizer switches to Setup tab
+Types name, sets skill, taps Add
+Player appears in roster with "Joining next round" badge
+Schedule regenerates for remaining rounds to include new player
+Toast appears on Session tab: "[Name] joined"
+New player appears in Leaderboard with 0 matches played
+
+Removing a player mid-session:
+
+Organizer swipes/taps remove on player in Setup
+Confirmation: "Remove [Name]? Their scores will be kept in history."
+Player is removed from future rounds; schedule regenerates
+Player stays in Leaderboard with their existing stats (grayed out or marked "Left")
+
+Odd number of players:
+
+App automatically determines who sits out, rotating fairly
+Setup tab shows sit-out count per player
+Organizer can override by toggling "Sit out next round" on specific players
+
+Adding rounds mid-session:
+
+Organizer increases round count from Setup tab
+New rounds are appended; schedule regenerates for new rounds only
+Existing completed rounds are untouched
+
+Multi-court async play:
+
+Courts can finish rounds at different times
+A court that finishes early shows "Waiting..." or can start next round immediately (configurable)
+Leaderboard updates in real-time as each court confirms scores
+
+
+Technical Requirements
+
+PWA: Installable with manifest.json, service worker for offline use, splash screen
+State: Zustand store with localStorage persistence. State shape:
+
+ts  interface AppState {
+    // Config
+    config: {
+      courts: number
+      pointsPerMatch: number
+      rounds: number
+      algorithm: 'balanced' | 'random' | 'king'
+    }
+
+    // Players — living roster, mutable throughout session
+    players: {
+      id: string
+      name: string
+      skill: 1 | 2 | 3 | 4 | 5
+      status: 'active' | 'waiting' | 'sitting_out' | 'removed'
+      joinedAtRound: number  // which round they entered
+      sitOutCount: number
+    }[]
+
+    // Session
+    sessionActive: boolean
+    currentRound: number
+
+    // Schedule — each round assigns player pairs to courts; players rotate every round
+    schedule: {
+      roundNumber: number
+      matches: {
+        id: string
+        court: number  // which physical court this match is on (just a location, not a player assignment)
+        teamA: { playerIds: string[] }
+        teamB: { playerIds: string[] }
+        status: 'upcoming' | 'in_progress' | 'completed'
+        score?: { teamA: number; teamB: number }
+      }[]
+      sittingOut: string[]  // player IDs sitting out this entire round
+    }[]
+
+    // Undo stack
+    undoStack: { action: string; payload: any; timestamp: number }[]
+  }
+
+Schedule regeneration: When players are added/removed, only regenerate FUTURE rounds. Never mutate completed rounds. The algorithm should:
+
+Rotate players across all courts — no player stays on the same court consecutive rounds
+Maximize partner diversity — every player should partner with as many different people as possible across rounds; no one plays with the same partner twice if avoidable
+Maximize opponent diversity — similarly, avoid repeat opponents where possible
+Rotate sit-outs fairly
+For "Balanced" mode: pair high+low skill vs mid+mid, distributing evenly across courts
+For "King of the Court": winners stay on their court, losers rotate out and get reassigned
+Courts are just locations — the algorithm assigns player pairs to courts each round, not players to fixed courts
+
+
+Responsive: Designed for mobile (375px–430px). Should work on tablet.
+Haptic feedback: navigator.vibrate(50) on score taps where supported
+No authentication. Single-device use.
+
+
+What NOT to Build (v1)
+
+No user accounts or authentication
+No backend / database
+No real-time multi-device sync
+No tournament bracket mode
+No chat or social features
+No ads or monetization
+
+
+File Structure
+src/
+  app/
+    layout.tsx            # Tab bar layout, persistent across all tabs
+    page.tsx              # Redirects to /setup
+    setup/page.tsx
+    session/page.tsx
+    schedule/page.tsx
+    leaderboard/page.tsx
+  components/
+    ui/                   # Button, Card, SegmentedControl, StarRating, ProgressBar, Toast, Badge
+    layout/               # TabBar, StatusBanner
+    setup/                # ConfigPanel, AlgorithmPicker, PlayerInput, PlayerRoster, PlayerCard
+    session/              # ScoreZone, MatchHeader, CourtSwitcher, MatchComplete, UndoButton, Timer
+    schedule/             # RoundTimeline, RoundCard, MatchPairing
+    leaderboard/          # RankingTable, PodiumHeader, ShareButton, PlayerStatRow
+  lib/
+    store.ts              # Zustand store with localStorage middleware
+    scheduler.ts          # Pairing algorithms + schedule regeneration logic
+    undo.ts               # Undo stack manager
+    utils.ts
+  styles/
+    globals.css
+
+Priority Order
+
+Session / Scorekeeping — get this right first. It's 90% of active usage time.
+Setup + Live Player Management — must support mid-session adds seamlessly.
+Schedule — needs to reflect dynamic changes in real time.
+Leaderboard — players check this between rounds.
+
+Start with the Zustand store and scheduler logic — these are the backbone. Then build the Session screen. Then Setup with live player management. Schedule and Leaderboard last.

@@ -1,1127 +1,1235 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
-
-// --- Types ---
-type Player = {
-  id: string;
-  name: string;
-  skill: number; // 1-5
-  gamesPlayed: number;
-  totalPoints: number;
-  wins: number;
-  losses: number;
-};
-
-type CourtMatchup = {
-  courtId: number;
-  teamA: [string, string]; // player ids
-  teamB: [string, string];
-};
-
-type RoundSchedule = {
-  matchup: CourtMatchup | null; // Single court matchup for this round
-  sittingOut: string[];
-};
-
-type MatchResult = {
-  scoreA: number;
-  scoreB: number;
-  teamAWon: boolean;
-};
-
-function getSkillLabel(skill: number): string {
-  switch (skill) {
-    case 1:
-      return "Beginner";
-    case 2:
-      return "Novice";
-    case 3:
-      return "Intermediate";
-    case 4:
-      return "Advanced";
-    case 5:
-      return "Expert";
-    default:
-      return "Beginner";
-  }
-}
+import { useState, useCallback, useMemo, useEffect } from "react";
+import { useStore, Player } from "../lib/store";
+import { generateSchedule, regenerateSchedule, getSkillLabel, getUniquePlayerName, generateRoundMatchups } from "../lib/scheduler";
 
 type Screen = "setup" | "session" | "leaderboard" | "schedule";
 
-function generateId(): string {
-  return Math.random().toString(36).slice(2, 11);
-}
-
-// If name already exists, return "Name (2)", "Name (3)", etc.
-function getUniquePlayerName(baseName: string, existingPlayers: { name: string }[]): string {
-  const names = new Set(existingPlayers.map((p) => p.name));
-  if (!names.has(baseName)) return baseName;
-  let n = 2;
-  while (names.has(`${baseName} (${n})`)) n++;
-  return `${baseName} (${n})`;
-}
-
-// Generate matchup for a single court
-function generateCourtMatchup(
-  players: Player[],
-  courtId: number,
-  lastCourtMatchup: CourtMatchup | null,
-  mustSitOut: Set<string> = new Set(),
-  availablePlayers: Set<string> | null = null // If provided, only use these players
-): { matchup: CourtMatchup | null; sittingOut: string[] } {
-  // Filter to available players if specified
-  const candidatePlayers = availablePlayers
-    ? players.filter((p) => availablePlayers.has(p.id))
-    : players;
-
-  // Sort by games played ascending so late arrivals (0 games) get priority
-  const sorted = [...candidatePlayers].sort((a, b) => a.gamesPlayed - b.gamesPlayed);
-  
-  // Players who must rest cannot be in "playing"; take first 4 who are not in mustSitOut
-  const playing: Player[] = [];
-  for (const p of sorted) {
-    if (playing.length >= 4) break;
-    if (mustSitOut.has(p.id)) continue;
-    playing.push(p);
-  }
-  
-  // If not enough, fill from mustSitOut so we have a full court
-  if (playing.length < 4) {
-    const rest = sorted.filter((p) => !playing.includes(p));
-    for (const p of rest) {
-      if (playing.length >= 4) break;
-      playing.push(p);
-    }
-  }
-
-  if (playing.length < 4) {
-    return { matchup: null, sittingOut: sorted.map((p) => p.id) };
-  }
-
-  const sittingOut = sorted.filter((p) => !playing.includes(p)).map((p) => p.id);
-
-  // Sort by skill desc: [high, mid2, mid1, low]
-  const bySkill = [...playing].sort((a, b) => b.skill - a.skill);
-  const [a, b, c1, d] = bySkill;
-  // Team1: high+low, Team2: mid+mid (balanced totals)
-  let teamA: [string, string] = [a.id, d.id];
-  let teamB: [string, string] = [b.id, c1.id];
-
-  // Soft partner rotation: if we have last round, try to swap so same pairs don't repeat
-  if (lastCourtMatchup) {
-    const prevPairs = [
-      new Set(lastCourtMatchup.teamA),
-      new Set(lastCourtMatchup.teamB),
-    ];
-    const samePartners = (t: [string, string]) =>
-      prevPairs.some((s) => t.every((id) => s.has(id)));
-    if (samePartners(teamA) || samePartners(teamB)) {
-      teamA = [a.id, c1.id];
-      teamB = [b.id, d.id];
-    }
-  }
-
-  return {
-    matchup: { courtId, teamA, teamB },
-    sittingOut,
-  };
-}
-
-// Get set of player ids who played in a matchup
-function getPlayingIds(matchup: CourtMatchup | null): Set<string> {
-  if (!matchup) return new Set<string>();
-  return new Set([...matchup.teamA, ...matchup.teamB]);
-}
-
-// Generate schedule for a single court
-function generateCourtSchedule(
-  players: Player[],
-  courtId: number,
-  totalRounds: number,
-  fromRoundIndex: number = 0,
-  previousRounds: RoundSchedule[] = [],
-  availablePlayers: Set<string> | null = null
-): RoundSchedule[] {
-  const schedule: RoundSchedule[] = [];
-  let lastCourtMatchup: CourtMatchup | null =
-    previousRounds.length > 0 ? previousRounds[previousRounds.length - 1].matchup : null;
-  let playedLastRound = previousRounds.length >= 1
-    ? getPlayingIds(previousRounds[previousRounds.length - 1].matchup)
-    : new Set<string>();
-  let playedTwoRoundsAgo = previousRounds.length >= 2
-    ? getPlayingIds(previousRounds[previousRounds.length - 2].matchup)
-    : new Set<string>();
-  const simPlayers = players.map((p) => ({ ...p }));
-
-  for (let r = fromRoundIndex; r < totalRounds; r++) {
-    const mustSitOut = new Set<string>();
-    playedLastRound.forEach((id) => {
-      if (playedTwoRoundsAgo.has(id)) mustSitOut.add(id);
-    });
-    const { matchup, sittingOut } = generateCourtMatchup(
-      simPlayers,
-      courtId,
-      lastCourtMatchup,
-      mustSitOut,
-      availablePlayers
-    );
-    schedule.push({ matchup, sittingOut });
-    const playedThisRound = getPlayingIds(matchup);
-    playedThisRound.forEach((id) => {
-      const p = simPlayers.find((x) => x.id === id);
-      if (p) p.gamesPlayed += 1;
-    });
-    playedTwoRoundsAgo = playedLastRound;
-    playedLastRound = playedThisRound;
-    lastCourtMatchup = matchup;
-  }
-  return schedule;
-}
-
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("setup");
-  const [numCourts, setNumCourts] = useState<number>(1); // Max courts configured (1-10)
-  const [matchingAlgorithm, setMatchingAlgorithm] = useState<"balanced" | "random" | "king">("balanced");
-  const [pointsPerMatch, setPointsPerMatch] = useState(21);
-  const [totalRounds, setTotalRounds] = useState(10);
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [activeCourts, setActiveCourts] = useState<number[]>([]); // Which courts are active (e.g. [1] or [1, 2])
-  const [currentRoundPerCourt, setCurrentRoundPerCourt] = useState<Record<number, number>>({});
-  const [schedulePerCourt, setSchedulePerCourt] = useState<Record<number, RoundSchedule[]>>({});
+  
+  // Zustand store
+  const {
+    config,
+    players,
+    savedRoster,
+    sessionActive,
+    currentRound,
+    schedule,
+    setConfig,
+    addPlayer: storeAddPlayer,
+    removePlayer: storeRemovePlayer,
+    pausePlayer: storePausePlayer,
+    resumePlayer: storeResumePlayer,
+    updatePlayer,
+    loadFromSavedRoster,
+    startSession: storeStartSession,
+    endSession: storeEndSession,
+    setCurrentRound,
+    setSchedule,
+    updateMatchScore,
+    completeMatch,
+    undoLastAction,
+    undoStack,
+  } = useStore();
 
-  // New player form (setup + late arrival)
+  // Local UI state
   const [newName, setNewName] = useState("");
-  const [newSkill, setNewSkill] = useState(3);
-
-  // Score entry per court per round: courtId -> roundIndex -> { scoreA, scoreB }
-  const [roundScoresPerCourt, setRoundScoresPerCourt] = useState<
-    Record<number, Record<number, { scoreA: number; scoreB: number }>>
-  >({});
-
-  // Match results: courtId -> roundIndex -> MatchResult
-  const [matchResults, setMatchResults] = useState<
-    Record<number, Record<number, MatchResult>>
-  >({});
-
-  // Schedule filter
+  const [newSkill, setNewSkill] = useState<1 | 2 | 3 | 4 | 5>(3);
+  const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
+  const [editingPlayerName, setEditingPlayerName] = useState("");
+  const [editingPlayerSkill, setEditingPlayerSkill] = useState<1 | 2 | 3 | 4 | 5>(3);
+  const [selectedCourt, setSelectedCourt] = useState<number>(1);
   const [scheduleFilterCourts, setScheduleFilterCourts] = useState<Set<number>>(new Set());
+  const [configCollapsed, setConfigCollapsed] = useState<boolean>(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [regularsSelected, setRegularsSelected] = useState<Set<string>>(new Set());
+  const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
+
+  const addToast = useCallback((message: string) => {
+    const id = Math.random().toString(36).slice(2, 9);
+    setToasts((prev) => [...prev.slice(-4), { id, message }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 4000);
+  }, []);
+
+  // Get active players
+  const activePlayers = useMemo(
+    () => players.filter((p) => p.status === "active"),
+    [players]
+  );
+
+  // Get current round data
+  const currentRoundData = useMemo(() => {
+    return schedule.find((r) => r.roundNumber === currentRound);
+  }, [schedule, currentRound]);
+
+  // Get current match for selected court
+  const currentMatch = useMemo(() => {
+    return currentRoundData?.matches.find((m) => m.court === selectedCourt);
+  }, [currentRoundData, selectedCourt]);
+
+  // Get current round matches (for court switcher and completion check)
+  const currentRoundMatches = useMemo(() => {
+    return currentRoundData?.matches || [];
+  }, [currentRoundData]);
 
   const addPlayer = useCallback(() => {
     const name = newName.trim();
     if (!name) return;
-    setPlayers((prev) => {
-      const uniqueName = getUniquePlayerName(name, prev);
-      // Use skill 3 if algorithm is not "balanced", otherwise use selected skill
-      const skillToUse = matchingAlgorithm === "balanced" ? Math.min(5, Math.max(1, newSkill)) : 3;
-      return [
-        ...prev,
-        {
-          id: generateId(),
-          name: uniqueName,
-          skill: skillToUse,
-          gamesPlayed: 0,
-          totalPoints: 0,
-          wins: 0,
-          losses: 0,
-        },
-      ];
-    });
+    const skillToUse = config.algorithm === "balanced" ? newSkill : (3 as 1 | 2 | 3 | 4 | 5);
+    
+    storeAddPlayer(name, skillToUse);
+    
+    if (sessionActive) {
+      const updatedPlayers = useStore.getState().players;
+      const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+      setSchedule(newSchedule);
+      addToast(`${name} joined — will play next round`);
+    }
+    
     setNewName("");
-    setNewSkill(1);
-  }, [newName, newSkill, matchingAlgorithm]);
+    setNewSkill(3);
+  }, [newName, newSkill, config, sessionActive, schedule, currentRound, storeAddPlayer, setSchedule, addToast]);
 
-  const removePlayer = useCallback(
+  const startEditingPlayer = useCallback((player: Player) => {
+    setEditingPlayerId(player.id);
+    setEditingPlayerName(player.name);
+    setEditingPlayerSkill(player.skill);
+  }, []);
+
+  const cancelEditingPlayer = useCallback(() => {
+    setEditingPlayerId(null);
+    setEditingPlayerName("");
+    setEditingPlayerSkill(3);
+  }, []);
+
+  const saveEditedPlayer = useCallback(() => {
+    if (!editingPlayerId) return;
+    const trimmedName = editingPlayerName.trim();
+    if (!trimmedName) {
+      cancelEditingPlayer();
+      return;
+    }
+
+    const existingPlayer = players.find((p) => p.id === editingPlayerId);
+    if (!existingPlayer) {
+      cancelEditingPlayer();
+      return;
+    }
+
+    const uniqueName = getUniquePlayerName(trimmedName, players.filter((p) => p.id !== editingPlayerId));
+    updatePlayer(editingPlayerId, {
+      name: uniqueName,
+      skill: config.algorithm === "balanced" ? editingPlayerSkill : existingPlayer.skill,
+    });
+
+    // If session is active, regenerate schedule
+    if (sessionActive) {
+      const updatedPlayers = useStore.getState().players;
+      // Regenerate from NEXT round to preserve current round in progress
+      const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+      setSchedule(newSchedule);
+    }
+
+    cancelEditingPlayer();
+  }, [editingPlayerId, editingPlayerName, editingPlayerSkill, config, players, sessionActive, schedule, currentRound, updatePlayer, setSchedule, cancelEditingPlayer]);
+
+  const updatePlayerSkill = useCallback((playerId: string, newSkill: 1 | 2 | 3 | 4 | 5) => {
+    if (config.algorithm !== "balanced") return;
+
+    updatePlayer(playerId, { skill: newSkill });
+
+    // If session is active, regenerate schedule
+    if (sessionActive) {
+      const updatedPlayers = useStore.getState().players;
+      // Regenerate from NEXT round to preserve current round in progress
+      const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+      setSchedule(newSchedule);
+    }
+  }, [config, sessionActive, schedule, currentRound, updatePlayer, setSchedule]);
+
+  const handleRemovePlayer = useCallback(
     (id: string) => {
-      setPlayers((prevPlayers) => {
-        const updatedPlayers = prevPlayers.filter((p) => p.id !== id);
-
-        // If no session is active yet, just update the list
-        if (activeCourts.length === 0) {
-          return updatedPlayers;
-        }
-
-        // Session is active: regenerate only future unplayed rounds per court
-        setSchedulePerCourt((prevSchedule) => {
-          const updatedSchedule: Record<number, RoundSchedule[]> = {};
-
-          activeCourts.forEach((courtId) => {
-            const currentRound = currentRoundPerCourt[courtId] ?? 1; // next round number (1-based)
-            const fromIndex = Math.max(0, currentRound - 1); // index of next unplayed round
-            const previousRounds = prevSchedule[courtId]?.slice(0, fromIndex) ?? [];
-
-            // Reassign players across courts (simple round-robin) based on updatedPlayers
-            const playersPerCourt: Record<number, Set<string>> = {};
-            activeCourts.forEach((cId) => {
-              playersPerCourt[cId] = new Set<string>();
-            });
-            let courtIndex = 0;
-            updatedPlayers.forEach((p) => {
-              const cId = activeCourts[courtIndex % activeCourts.length];
-              playersPerCourt[cId].add(p.id);
-              courtIndex++;
-            });
-
-            const targetRounds = Math.max(prevSchedule[courtId]?.length ?? 0, totalRounds);
-            const newFutureRounds = generateCourtSchedule(
-              updatedPlayers,
-              courtId,
-              targetRounds,
-              fromIndex,
-              previousRounds,
-              playersPerCourt[courtId]
-            );
-
-            updatedSchedule[courtId] = [...previousRounds, ...newFutureRounds];
-          });
-
-          return { ...prevSchedule, ...updatedSchedule };
-        });
-
-        // Past results and matchResults are untouched
-        return updatedPlayers;
-      });
+      storeRemovePlayer(id);
+      setDeleteConfirmId(null);
+      if (sessionActive) {
+        const updatedPlayers = useStore.getState().players;
+        const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+        setSchedule(newSchedule);
+      }
     },
-    [activeCourts, currentRoundPerCourt, totalRounds]
+    [sessionActive, config, schedule, currentRound, storeRemovePlayer, setSchedule]
   );
 
+  const handlePausePlayer = useCallback(
+    (id: string) => {
+      const name = players.find((p) => p.id === id)?.name;
+      storePausePlayer(id);
+      if (sessionActive) {
+        const updatedPlayers = useStore.getState().players;
+        const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+        setSchedule(newSchedule);
+        if (name) addToast(`${name} paused`);
+      }
+    },
+    [players, sessionActive, config, schedule, currentRound, storePausePlayer, setSchedule, addToast]
+  );
+
+  const handleResumePlayer = useCallback(
+    (id: string) => {
+      storeResumePlayer(id);
+      if (sessionActive) {
+        const updatedPlayers = useStore.getState().players;
+        const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+        setSchedule(newSchedule);
+      }
+    },
+    [sessionActive, config, schedule, currentRound, storeResumePlayer, setSchedule]
+  );
+
+  const handleAddSelectedRegulars = useCallback(() => {
+    savedRoster.forEach((sp) => {
+      if (regularsSelected.has(sp.id)) {
+        loadFromSavedRoster(sp);
+      }
+    });
+    setRegularsSelected(new Set());
+    if (sessionActive) {
+      const updatedPlayers = useStore.getState().players;
+      const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+      setSchedule(newSchedule);
+    }
+  }, [savedRoster, regularsSelected, sessionActive, config, schedule, currentRound, loadFromSavedRoster, setSchedule]);
+
   const startSession = useCallback(() => {
-    const maxPossibleCourts = Math.floor(players.length / 4);
-    if (maxPossibleCourts < 1) return;
+    if (activePlayers.length < config.courts * 4) return;
     
-    const startingCourts = Math.min(maxPossibleCourts, numCourts);
-    const courtsToStart = Array.from({ length: startingCourts }, (_, i) => i + 1);
-    setActiveCourts(courtsToStart);
-    
-    const newSchedulePerCourt: Record<number, RoundSchedule[]> = {};
-    const newCurrentRoundPerCourt: Record<number, number> = {};
-    
-    // Track which players are assigned to which courts
-    const playersPerCourt: Record<number, Set<string>> = {};
-    const allAssignedPlayers = new Set<string>();
-    
-    // Assign players to courts (simple round-robin for now)
-    courtsToStart.forEach((courtId) => {
-      playersPerCourt[courtId] = new Set<string>();
-    });
-    
-    let courtIndex = 0;
-    players.forEach((p) => {
-      const courtId = courtsToStart[courtIndex % courtsToStart.length];
-      playersPerCourt[courtId].add(p.id);
-      allAssignedPlayers.add(p.id);
-      courtIndex++;
-    });
-    
-    // Generate schedule for each court
-    courtsToStart.forEach((courtId) => {
-      newSchedulePerCourt[courtId] = generateCourtSchedule(
-        players,
-        courtId,
-        totalRounds,
-        0,
-        [],
-        playersPerCourt[courtId]
-      );
-      newCurrentRoundPerCourt[courtId] = 1;
-    });
-    
-    setSchedulePerCourt(newSchedulePerCourt);
-    setCurrentRoundPerCourt(newCurrentRoundPerCourt);
-    setRoundScoresPerCourt({});
+    // Generate initial schedule
+    const newSchedule = generateSchedule(activePlayers, config);
+    setSchedule(newSchedule);
+    storeStartSession();
     setScreen("session");
-  }, [players, numCourts, totalRounds]);
+  }, [activePlayers, config, setSchedule, storeStartSession]);
 
   const getPlayer = useCallback(
     (id: string) => players.find((p) => p.id === id),
     [players]
   );
 
-  // Check if we can add another court
-  const canAddCourt = useMemo(() => {
-    const totalPlayersNeeded = (activeCourts.length + 1) * 4;
-    return players.length >= totalPlayersNeeded && activeCourts.length < numCourts;
-  }, [players.length, activeCourts.length, numCourts]);
-
-  const addCourt = useCallback(() => {
-    if (!canAddCourt) return;
-    const newCourtId = activeCourts.length + 1;
-    const newActiveCourts = [...activeCourts, newCourtId];
-    setActiveCourts(newActiveCourts);
-    
-    // Reassign players to all courts including new one
-    const playersPerCourt: Record<number, Set<string>> = {};
-    newActiveCourts.forEach((courtId) => {
-      playersPerCourt[courtId] = new Set<string>();
-    });
-    
-    let courtIndex = 0;
-    players.forEach((p) => {
-      const courtId = newActiveCourts[courtIndex % newActiveCourts.length];
-      playersPerCourt[courtId].add(p.id);
-      courtIndex++;
-    });
-    
-    // Generate schedule for new court
-    const newSchedule = generateCourtSchedule(
-      players,
-      newCourtId,
-      totalRounds,
-      0,
-      [],
-      playersPerCourt[newCourtId]
-    );
-    
-    setSchedulePerCourt((prev) => ({
-      ...prev,
-      [newCourtId]: newSchedule,
-    }));
-    
-    setCurrentRoundPerCourt((prev) => ({
-      ...prev,
-      [newCourtId]: 1,
-    }));
-  }, [canAddCourt, activeCourts, players, totalRounds]);
-
-  const handleConfirmCourtScore = useCallback((courtId: number) => {
-    const roundIndex = (currentRoundPerCourt[courtId] ?? 1) - 1;
-    const roundData = schedulePerCourt[courtId]?.[roundIndex];
-    if (!roundData?.matchup) return;
-    
-    const scores = roundScoresPerCourt[courtId]?.[roundIndex];
-    if (!scores || (scores.scoreA === 0 && scores.scoreB === 0)) return;
-
-    const mu = roundData.matchup;
-    const scoreA = scores.scoreA;
-    const scoreB = scores.scoreB;
-    const teamAWon = scoreA > scoreB;
-    const winScore = teamAWon ? scoreA : scoreB;
-    const loseScore = teamAWon ? scoreB : scoreA;
-
-    // Store match result
-    setMatchResults((prev) => ({
-      ...prev,
-      [courtId]: {
-        ...prev[courtId],
-        [roundIndex]: { scoreA, scoreB, teamAWon },
-      },
-    }));
-
-    setPlayers((prev) => {
-      const updated = prev.map((p) => ({ ...p }));
-      [...mu.teamA, ...mu.teamB].forEach((pid) => {
-        const pl = updated.find((x) => x.id === pid);
-        if (!pl) return;
-        pl.gamesPlayed += 1;
-        const isWinner = (teamAWon && mu.teamA.includes(pid)) || (!teamAWon && mu.teamB.includes(pid));
-        pl.totalPoints += isWinner ? winScore : loseScore;
-        if (isWinner) pl.wins += 1;
-        else pl.losses += 1;
-      });
-      return updated;
-    });
-
-    setCurrentRoundPerCourt((prev) => ({
-      ...prev,
-      [courtId]: (prev[courtId] ?? 1) + 1,
-    }));
-
-    setRoundScoresPerCourt((prev) => {
-      const courtScores = prev[courtId] ?? {};
-      const { [roundIndex]: _, ...rest } = courtScores;
-      return { ...prev, [courtId]: rest };
-    });
-  }, [currentRoundPerCourt, schedulePerCourt, roundScoresPerCourt]);
-
-  const addLateArrival = useCallback(() => {
-    const name = newName.trim();
-    if (!name) return;
-    const uniqueName = getUniquePlayerName(name, players);
-    // Use skill 3 if algorithm is not "balanced", otherwise use selected skill
-    const skillToUse = matchingAlgorithm === "balanced" ? Math.min(5, Math.max(1, newSkill)) : 3;
-    const newPlayer: Player = {
-      id: generateId(),
-      name: uniqueName,
-      skill: skillToUse,
-      gamesPlayed: 0,
-      totalPoints: 0,
-      wins: 0,
-      losses: 0,
-    };
-    const updatedPlayers = [...players, newPlayer];
-    setPlayers(updatedPlayers);
-    setNewName("");
-    setNewSkill(1);
-
-    // Regenerate future rounds for all active courts (keep all played rounds)
-    setSchedulePerCourt((prev) => {
-      const updated: Record<number, RoundSchedule[]> = {};
-      activeCourts.forEach((courtId) => {
-        const currentRound = currentRoundPerCourt[courtId] ?? 1; // next round number (1-based)
-        const fromIndex = Math.max(0, currentRound - 1); // index of next unplayed round
-        const previousRounds = prev[courtId]?.slice(0, fromIndex) ?? [];
-
-        // Reassign players to courts
-        const playersPerCourt: Record<number, Set<string>> = {};
-        activeCourts.forEach((cId) => {
-          playersPerCourt[cId] = new Set<string>();
-        });
-        let courtIndex = 0;
-        updatedPlayers.forEach((p) => {
-          const cId = activeCourts[courtIndex % activeCourts.length];
-          playersPerCourt[cId].add(p.id);
-          courtIndex++;
-        });
-        
-        const targetRounds = Math.max(prev[courtId]?.length ?? 0, totalRounds);
-        const newFutureRounds = generateCourtSchedule(
-          updatedPlayers,
-          courtId,
-          targetRounds,
-          fromIndex,
-          previousRounds,
-          playersPerCourt[courtId]
-        );
-        updated[courtId] = [...previousRounds, ...newFutureRounds];
-      });
-      return { ...prev, ...updated };
-    });
-  }, [newName, newSkill, players, activeCourts, currentRoundPerCourt, totalRounds, matchingAlgorithm]);
-
   const endSession = useCallback(() => {
-    setActiveCourts([]);
-    setSchedulePerCourt({});
-    setCurrentRoundPerCourt({});
-    setRoundScoresPerCourt({});
-    setMatchResults({});
+    storeEndSession();
     setScreen("leaderboard");
-  }, []);
+  }, [storeEndSession]);
 
-  const skipMatchAndRegenerate = useCallback((courtId: number) => {
-    // Skip current round by advancing to next round, then regenerate from there
-    const currentRound = currentRoundPerCourt[courtId] ?? 1;
-    const nextRound = currentRound + 1;
-    
-    // Advance to next round
-    setCurrentRoundPerCourt((prev) => ({
-      ...prev,
-      [courtId]: nextRound,
-    }));
-    
-    // Clear any scores for the skipped round
-    setRoundScoresPerCourt((prev) => {
-      const courtScores = prev[courtId] ?? {};
-      const skippedRoundIndex = currentRound - 1;
-      const { [skippedRoundIndex]: _, ...rest } = courtScores;
-      return { ...prev, [courtId]: rest };
+  const leaderboardSorted = useMemo(() => {
+    return [...players].sort((a, b) => {
+      if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
+      return b.wins - a.wins;
     });
-    
-    // Regenerate schedule from next round
-    const fromIndex = nextRound;
-    
-    // Reassign players
-    const playersPerCourt: Record<number, Set<string>> = {};
-    activeCourts.forEach((cId) => {
-      playersPerCourt[cId] = new Set<string>();
-    });
-    let courtIndex = 0;
-    players.forEach((p) => {
-      const cId = activeCourts[courtIndex % activeCourts.length];
-      playersPerCourt[cId].add(p.id);
-      courtIndex++;
-    });
-    
-    setSchedulePerCourt((prev) => {
-      const previousRounds = prev[courtId]?.slice(0, fromIndex) ?? [];
-      const targetRounds = Math.max(prev[courtId]?.length ?? 0, totalRounds);
-      const newFutureRounds = generateCourtSchedule(
-        players,
-        courtId,
-        targetRounds,
-        fromIndex,
-        previousRounds,
-        playersPerCourt[courtId]
-      );
-      return {
-        ...prev,
-        [courtId]: [...previousRounds, ...newFutureRounds],
-      };
-    });
-  }, [players, activeCourts, currentRoundPerCourt, totalRounds]);
+  }, [players]);
 
-  const leaderboardSorted = [...players].sort((a, b) => {
-    if (b.totalPoints !== a.totalPoints) return b.totalPoints - a.totalPoints;
-    return b.wins - a.wins;
-  });
+  const canStartSession = activePlayers.length >= config.courts * 4;
 
-  const canStartSession = players.length >= 4;
-
-  // Get all players currently playing across all courts
+  // Get all players currently playing across all courts in current round
   const allPlayingThisRound = useMemo(() => {
     const playing = new Set<string>();
-    activeCourts.forEach((courtId) => {
-      const roundIndex = (currentRoundPerCourt[courtId] ?? 1) - 1;
-      const roundData = schedulePerCourt[courtId]?.[roundIndex];
-      if (roundData?.matchup) {
-        roundData.matchup.teamA.forEach((id) => playing.add(id));
-        roundData.matchup.teamB.forEach((id) => playing.add(id));
-      }
-    });
+    if (currentRoundData) {
+      currentRoundData.matches.forEach((match) => {
+        match.teamA.playerIds.forEach((id) => playing.add(id));
+        match.teamB.playerIds.forEach((id) => playing.add(id));
+      });
+    }
     return playing;
-  }, [activeCourts, currentRoundPerCourt, schedulePerCourt]);
+  }, [currentRoundData]);
 
   const allSittingOut = useMemo(() => {
-    return players.filter((p) => !allPlayingThisRound.has(p.id)).map((p) => p.id);
-  }, [players, allPlayingThisRound]);
+    return currentRoundData?.sittingOut || [];
+  }, [currentRoundData]);
 
-  const sessionActive = activeCourts.length > 0;
+  // Calculate estimated session time (in minutes)
+  // Assumes ~8-10 minutes per match on average
+  const estimatedSessionTime = useMemo(() => {
+    const matchesPerRound = config.courts;
+    const totalMatches = matchesPerRound * config.rounds;
+    const avgMatchTime = 8; // minutes per match
+    const totalTime = totalMatches * avgMatchTime;
+    return Math.round(totalTime);
+  }, [config.courts, config.rounds]);
+
+  // Get player status for display
+  const getPlayerStatus = useCallback((player: Player): "Playing" | "Waiting" | "Paused" | "Joining next round" | "Sitting out" => {
+    // Check if player is paused
+    if (player.status === "paused") {
+      return "Paused";
+    }
+    
+    if (!sessionActive) {
+      return "Waiting";
+    }
+    
+    // Check if player joined after current round started
+    if (player.joinedAtRound > currentRound) {
+      return "Joining next round";
+    }
+    
+    // Check if player is in current round matches
+    if (currentRoundData) {
+      const isPlaying = currentRoundData.matches.some(
+        (match) => 
+          match.teamA.playerIds.includes(player.id) || 
+          match.teamB.playerIds.includes(player.id)
+      );
+      if (isPlaying) {
+        return "Playing";
+      }
+      
+      // Check if sitting out
+      if (currentRoundData.sittingOut.includes(player.id)) {
+        return "Sitting out";
+      }
+    }
+    
+    return "Waiting";
+  }, [sessionActive, currentRound, currentRoundData]);
+
+  // Preset configurations
+  const applyPreset = useCallback((preset: "quick" | "standard" | "long") => {
+    const presets = {
+      quick: { rounds: 6, pointsPerMatch: 16 },
+      standard: { rounds: 10, pointsPerMatch: 21 },
+      long: { rounds: 14, pointsPerMatch: 32 },
+    };
+    
+    const presetConfig = presets[preset];
+    setConfig(presetConfig);
+    
+    if (sessionActive) {
+      // Regenerate from NEXT round to preserve current round in progress
+      const newSchedule = regenerateSchedule(players, { ...config, ...presetConfig }, schedule, currentRound + 1);
+      setSchedule(newSchedule);
+    }
+  }, [config, sessionActive, players, schedule, currentRound, setConfig, setSchedule]);
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
-      <div className="mx-auto max-w-lg px-3 sm:px-4 py-4 sm:py-6 pb-20 sm:pb-24 safe-area-pb">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-400 mb-4 sm:mb-6">
-          gaspadel
-        </h1>
+    <div className={`min-h-screen font-sans ${screen === "session" ? "bg-white" : "bg-gray-50 text-gray-900"}`}>
+      <div className={`mx-auto max-w-lg px-3 sm:px-4 py-4 sm:py-6 ${screen === "session" ? "" : "pb-20 sm:pb-24 safe-area-pb"}`}>
+        {screen !== "session" && (
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-600 mb-4 sm:mb-6">
+            gaspadel
+          </h1>
+        )}
 
         {/* Tab nav */}
-        <nav className="flex gap-1 mb-4 sm:mb-6 rounded-xl bg-slate-800/60 p-1 overflow-x-auto">
+        {screen !== "session" && (
+          <nav className="flex gap-1 mb-4 sm:mb-6 rounded-xl bg-slate-200/80 p-1 overflow-x-auto">
           <button
             type="button"
             onClick={() => setScreen("setup")}
-            className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${screen === "setup" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+            className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${screen === "setup" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
           >
             Setup
           </button>
           <button
             type="button"
             onClick={() => setScreen("session")}
-            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "session" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "session" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
           >
             Session
           </button>
           <button
             type="button"
             onClick={() => setScreen("schedule")}
-            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "schedule" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "schedule" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
           >
             Schedule
           </button>
           <button
             type="button"
             onClick={() => setScreen("leaderboard")}
-            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "leaderboard" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}
+            className={`flex-1 min-w-0 rounded-lg py-2.5 text-sm font-medium transition shrink-0 ${screen === "leaderboard" ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"}`}
           >
             Leaderboard
           </button>
         </nav>
+        )}
 
         {/* --- Setup Screen --- */}
         {screen === "setup" && (
           <div className="space-y-6">
-            <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h2 className="text-sm font-semibold text-slate-300 mb-3">Max Courts</h2>
-              <p className="text-xs text-slate-400 mb-3">
-                Start with available players. Add more courts when enough players arrive.
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setNumCourts(Math.max(1, numCourts - 1))}
-                  disabled={numCourts === 1}
-                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                  aria-label="Decrease max courts"
-                >
-                  −
-                </button>
-                <div className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600">
-                  {numCourts} court{numCourts > 1 ? "s" : ""}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setNumCourts(Math.min(10, numCourts + 1))}
-                  disabled={numCourts === 10}
-                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                  aria-label="Increase max courts"
-                >
-                  +
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h2 className="text-sm font-semibold text-slate-300 mb-3">Points per match</h2>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setPointsPerMatch(Math.max(1, pointsPerMatch - 1))}
-                  disabled={pointsPerMatch === 1}
-                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                  aria-label="Decrease points per match"
-                >
-                  −
-                </button>
-                <div className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600">
-                  {pointsPerMatch}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setPointsPerMatch(Math.min(64, pointsPerMatch + 1))}
-                  disabled={pointsPerMatch === 64}
-                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                  aria-label="Increase points per match"
-                >
-                  +
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h2 className="text-sm font-semibold text-slate-300 mb-3">Number of rounds</h2>
-              <p className="text-xs text-slate-400 mb-2">Full schedule is generated at start. You can change this during session.</p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setTotalRounds(Math.max(1, totalRounds - 1))}
-                  disabled={totalRounds === 1}
-                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 disabled:opacity-50 disabled:cursor-not-allowed text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                  aria-label="Decrease number of rounds"
-                >
-                  −
-                </button>
-                <div className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600">
-                  {totalRounds}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setTotalRounds(Math.min(99, totalRounds + 1))}
-                  disabled={totalRounds === 99}
-                  className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                  aria-label="Increase number of rounds"
-                >
-                  +
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h2 className="text-sm font-semibold text-slate-300 mb-3">Matching Algorithm</h2>
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMatchingAlgorithm("balanced")}
-                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
-                    matchingAlgorithm === "balanced"
-                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
-                      : "border-slate-700 bg-slate-800 text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">Balanced</div>
-                  <p className="text-xs text-slate-400">
-                    Balance skill levels across teams for fair matchups.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMatchingAlgorithm("random")}
-                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
-                    matchingAlgorithm === "random"
-                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
-                      : "border-slate-700 bg-slate-800 text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">Random</div>
-                  <p className="text-xs text-slate-400">
-                    Fully randomized matchups, ignoring skill ratings.
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMatchingAlgorithm("king")}
-                  className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
-                    matchingAlgorithm === "king"
-                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-100"
-                      : "border-slate-700 bg-slate-800 text-slate-200"
-                  }`}
-                >
-                  <div className="font-semibold">King of the Court</div>
-                  <p className="text-xs text-slate-400">
-                    Winning team stays on court; losing team rotates off.
-                  </p>
-                </button>
-              </div>
-            </section>
-
-            <section className="rounded-2xl bg-slate-800/50 p-4">
-              <h2 className="text-sm font-semibold text-slate-300 mb-3">Players</h2>
-              <p className="text-xs text-slate-400 mb-3">
-                Need at least 4 to start. You can add more during the session.
-              </p>
-              <div className="flex flex-col gap-3 mb-4">
-                {matchingAlgorithm === "balanced" && (
-                  <div className="w-full flex flex-col items-center">
-                    <div className="flex justify-center gap-1">
-                      {[1, 2, 3, 4, 5].map((star) => (
-                        <button
-                          key={star}
-                          type="button"
-                          onClick={() => setNewSkill(star)}
-                          className="w-10 h-10 flex items-center justify-center text-2xl select-none touch-manipulation"
-                          aria-label={`Set skill to ${getSkillLabel(star)}`}
-                        >
-                          <span className={star <= newSkill ? "text-emerald-400" : "text-slate-500"}>
-                            ★
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                    <span className="mt-1 text-[11px] text-emerald-400 leading-none">
-                      {getSkillLabel(newSkill)}
-                    </span>
+            {/* Session Status Banner */}
+            {sessionActive && (
+              <div className="rounded-2xl bg-emerald-50 border border-emerald-300 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-emerald-800">Session Active</p>
+                    <p className="text-xs text-emerald-700 mt-1">
+                      Round {currentRound} of {config.rounds}
+                    </p>
                   </div>
-                )}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addPlayer()}
-                    className="flex-1 rounded-xl bg-slate-700 px-4 py-2.5 text-white placeholder-slate-500 border border-slate-600 focus:border-emerald-500 outline-none"
-                  />
                   <button
                     type="button"
-                    onClick={sessionActive ? addLateArrival : addPlayer}
-                    className="rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px]"
+                    onClick={endSession}
+                    className="px-4 py-2 rounded-lg bg-red-50 border border-red-300 text-red-700 text-sm font-medium hover:bg-red-100 touch-manipulation"
                   >
-                    Add
+                    End Session
                   </button>
                 </div>
               </div>
-              <ul className="space-y-2">
-                {players.map((p) => (
-                  <li
-                    key={p.id}
-                    className="flex items-center justify-between rounded-xl bg-slate-700/80 px-4 py-2.5"
+            )}
+
+            {/* Preset Buttons */}
+            {!sessionActive && (
+              <section className="rounded-2xl bg-white border border-slate-200 p-4">
+                <h2 className="text-sm font-semibold text-slate-800 mb-3">Quick Presets</h2>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("quick")}
+                    className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                      config.rounds === 6 && config.pointsPerMatch === 16
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-200 text-slate-800 hover:bg-slate-300"
+                    }`}
                   >
-                    <span className="font-medium">{p.name}</span>
-                    <div className="flex items-center gap-3">
-                      {matchingAlgorithm === "balanced" && (
-                        <span className="inline-flex items-center rounded-full bg-emerald-900/40 border border-emerald-500/60 px-2.5 py-0.5 text-[11px] font-medium text-emerald-300">
-                          {getSkillLabel(p.skill)}
-                        </span>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => removePlayer(p.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-semibold"
-                        aria-label={`Remove ${p.name}`}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
+                    <div className="font-semibold">Quick</div>
+                    <div className="text-xs opacity-80 mt-0.5">6 rounds, 16pts</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("standard")}
+                    className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                      config.rounds === 10 && config.pointsPerMatch === 21
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-200 text-slate-800 hover:bg-slate-300"
+                    }`}
+                  >
+                    <div className="font-semibold">Standard</div>
+                    <div className="text-xs opacity-80 mt-0.5">10 rounds, 21pts</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyPreset("long")}
+                    className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                      config.rounds === 14 && config.pointsPerMatch === 32
+                        ? "bg-emerald-600 text-white"
+                        : "bg-slate-200 text-slate-800 hover:bg-slate-300"
+                    }`}
+                  >
+                    <div className="font-semibold">Long</div>
+                    <div className="text-xs opacity-80 mt-0.5">14 rounds, 32pts</div>
+                  </button>
+                </div>
+              </section>
+            )}
+
+            {/* Estimated Session Time */}
+            <section className="rounded-2xl bg-white border border-slate-200 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800">Estimated Time</h2>
+                  <p className="text-xs text-slate-600 mt-1">
+                    ~{estimatedSessionTime} min with {activePlayers.length} player{activePlayers.length !== 1 ? "s" : ""} on {config.courts} court{config.courts > 1 ? "s" : ""}
+                  </p>
+                </div>
+              </div>
             </section>
 
-            <button
-              type="button"
-              onClick={startSession}
-              disabled={!canStartSession}
-              className="w-full rounded-xl bg-emerald-600 py-4 sm:py-4 font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[52px]"
-            >
-              {sessionActive ? "Update session" : "Start session"}
-            </button>
-            {!canStartSession && !sessionActive && (
-              <p className="text-center text-sm text-slate-400">
-                Add at least 4 players to start.
-              </p>
-            )}
-            {sessionActive && (
+            {/* Collapsible Config Section */}
+            <section className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
               <button
                 type="button"
-                onClick={endSession}
-                className="w-full rounded-xl bg-slate-700 py-3 mt-2 text-sm font-medium text-slate-200 hover:bg-slate-600 touch-manipulation min-h-[44px]"
+                onClick={() => setConfigCollapsed(!configCollapsed)}
+                className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors touch-manipulation"
               >
-                End session
+                <h2 className="text-sm font-semibold text-slate-800">Configuration</h2>
+                <span className="text-slate-500 text-lg">
+                  {configCollapsed ? "▼" : "▲"}
+                </span>
               </button>
+              
+              {!configCollapsed && (
+                <div className="px-4 pb-4 space-y-4">
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Max Courts</h3>
+                    <p className="text-xs text-slate-600 mb-2">
+                      Start with available players. Add more courts when enough players arrive.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfig({ courts: Math.max(1, config.courts - 1) })}
+                        disabled={config.courts === 1}
+                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-200 hover:bg-slate-300 active:bg-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                        aria-label="Decrease max courts"
+                      >
+                        −
+                      </button>
+                      <div className="flex-1 min-w-0 rounded-xl bg-slate-100 px-4 py-3 text-center text-lg font-semibold text-slate-900 border border-slate-300">
+                        {config.courts} court{config.courts > 1 ? "s" : ""}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setConfig({ courts: Math.min(10, config.courts + 1) })}
+                        disabled={config.courts === 10}
+                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                        aria-label="Increase max courts"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Points per match</h3>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setConfig({ pointsPerMatch: Math.max(1, config.pointsPerMatch - 1) })}
+                        disabled={config.pointsPerMatch === 1}
+                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-200 hover:bg-slate-300 active:bg-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                        aria-label="Decrease points per match"
+                      >
+                        −
+                      </button>
+                      <div className="flex-1 min-w-0 rounded-xl bg-slate-100 px-4 py-3 text-center text-lg font-semibold text-slate-900 border border-slate-300">
+                        {config.pointsPerMatch}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setConfig({ pointsPerMatch: Math.min(64, config.pointsPerMatch + 1) })}
+                        disabled={config.pointsPerMatch === 64}
+                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                        aria-label="Increase points per match"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Number of rounds</h3>
+                    {sessionActive && (
+                      <p className="text-xs text-amber-600 mb-2">⚠️ Schedule will regenerate for remaining rounds.</p>
+                    )}
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                    setConfig({ rounds: Math.max(1, config.rounds - 1) });
+                    if (sessionActive) {
+                      // Regenerate from NEXT round to preserve current round in progress
+                      const newSchedule = regenerateSchedule(players, { ...config, rounds: Math.max(1, config.rounds - 1) }, schedule, currentRound + 1);
+                      setSchedule(newSchedule);
+                    }
+                  }}
+                        disabled={config.rounds === 1}
+                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-200 hover:bg-slate-300 active:bg-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                        aria-label="Decrease number of rounds"
+                      >
+                        −
+                      </button>
+                      <div className="flex-1 min-w-0 rounded-xl bg-slate-100 px-4 py-3 text-center text-lg font-semibold text-slate-900 border border-slate-300">
+                        {config.rounds}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                    setConfig({ rounds: Math.min(99, config.rounds + 1) });
+                    if (sessionActive) {
+                      // Regenerate from NEXT round to preserve current round in progress
+                      const newSchedule = regenerateSchedule(players, { ...config, rounds: Math.min(99, config.rounds + 1) }, schedule, currentRound + 1);
+                      setSchedule(newSchedule);
+                    }
+                        }}
+                        disabled={config.rounds === 99}
+                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
+                        aria-label="Increase number of rounds"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Matching Algorithm</h3>
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                    setConfig({ algorithm: "balanced" });
+                    if (sessionActive) {
+                      // Regenerate from NEXT round to preserve current round in progress
+                      const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
+                      setSchedule(newSchedule);
+                    }
+                        }}
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                          config.algorithm === "balanced"
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                            : "border-slate-300 bg-slate-100 text-slate-800"
+                        }`}
+                      >
+                        <div className="font-semibold">Balanced</div>
+                        <p className="text-xs text-slate-600">
+                          Balance skill levels across teams for fair matchups.
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                    setConfig({ algorithm: "random" });
+                    if (sessionActive) {
+                      // Regenerate from NEXT round to preserve current round in progress
+                      const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
+                      setSchedule(newSchedule);
+                    }
+                        }}
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                          config.algorithm === "random"
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                            : "border-slate-300 bg-slate-100 text-slate-800"
+                        }`}
+                      >
+                        <div className="font-semibold">Random</div>
+                        <p className="text-xs text-slate-600">
+                          Fully randomized matchups, ignoring skill ratings.
+                        </p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                    setConfig({ algorithm: "king" });
+                    if (sessionActive) {
+                      // Regenerate from NEXT round to preserve current round in progress
+                      const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
+                      setSchedule(newSchedule);
+                    }
+                        }}
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                          config.algorithm === "king"
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                            : "border-slate-300 bg-slate-100 text-slate-800"
+                        }`}
+                      >
+                        <div className="font-semibold">King of the Court</div>
+                        <p className="text-xs text-slate-600">
+                          Winning team stays on court; losing team rotates off.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl bg-white border border-slate-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-800">Players</h2>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-semibold ${activePlayers.length >= config.courts * 4 ? "text-emerald-600" : "text-slate-600"}`}>
+                    {activePlayers.length}
+                  </span>
+                  <span className="text-xs text-slate-500">/ {config.courts * 4} min</span>
+                </div>
+              </div>
+              <p className="text-xs text-slate-600 mb-3">
+                Need at least {config.courts * 4} to start ({config.courts} court{config.courts > 1 ? "s" : ""}). You can add more during the session.
+              </p>
+
+              {/* Your regulars — quick re-add from saved roster */}
+              {savedRoster.length > 0 && (() => {
+                const currentIds = new Set(players.filter((x) => x.status !== "removed").map((x) => x.id));
+                const regularsNotInRoster = savedRoster.filter((sp) => !currentIds.has(sp.id));
+                if (regularsNotInRoster.length === 0) return null;
+                return (
+                  <div className="mb-4 rounded-xl bg-slate-100 border border-slate-200 p-3">
+                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Your regulars</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {regularsNotInRoster.map((sp) => (
+                        <label
+                          key={sp.id}
+                          className="flex items-center gap-2 rounded-lg bg-white border border-slate-200 px-3 py-2 cursor-pointer touch-manipulation min-h-[44px]"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={regularsSelected.has(sp.id)}
+                            onChange={(e) => {
+                              setRegularsSelected((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(sp.id);
+                                else next.delete(sp.id);
+                                return next;
+                              });
+                            }}
+                            className="rounded border-slate-400 text-emerald-600 focus:ring-emerald-500"
+                          />
+                          <span className="text-sm text-slate-800">{sp.name}</span>
+                          {config.algorithm === "balanced" && (
+                            <span className="text-[10px] text-emerald-600">{getSkillLabel(sp.skill)}</span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                    {regularsSelected.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleAddSelectedRegulars}
+                        className="mt-2 w-full rounded-lg bg-emerald-600/80 py-2 text-sm font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[40px]"
+                      >
+                        Add selected ({regularsSelected.size})
+                      </button>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Add player */}
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  placeholder="Name"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addPlayer()}
+                  className="flex-1 rounded-xl bg-white px-4 py-2.5 text-slate-900 placeholder-slate-500 border border-slate-300 focus:border-emerald-500 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={addPlayer}
+                  className="rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px]"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Player roster */}
+              <ul className="space-y-2">
+                {players.filter((p) => p.status !== "removed").map((p) => {
+                  const isEditing = editingPlayerId === p.id;
+                  const isPaused = p.status === "paused";
+                  const showDeleteConfirm = deleteConfirmId === p.id;
+                  const status = getPlayerStatus(p);
+                  const statusColors: Record<string, string> = {
+                    Playing: "bg-emerald-500/20 text-emerald-300 border-emerald-500/50",
+                    Waiting: "bg-blue-500/20 text-blue-300 border-blue-500/50",
+                    Paused: "bg-orange-500/20 text-orange-300 border-orange-500/50",
+                    "Joining next round": "bg-amber-500/20 text-amber-300 border-amber-500/50",
+                    "Sitting out": "bg-slate-200 text-slate-700 border-slate-300",
+                  };
+                  return (
+                    <li
+                      key={p.id}
+                      className={`flex flex-col gap-2 rounded-xl px-4 py-3 transition-all border ${
+                        isPaused ? "bg-slate-100 opacity-75 border-slate-200" : "bg-slate-50 border-slate-200"
+                      } ${isEditing ? "ring-2 ring-emerald-500 bg-white" : ""}`}
+                    >
+                      {isEditing ? (
+                        <div className="flex flex-col gap-2">
+                          <input
+                            type="text"
+                            value={editingPlayerName}
+                            onChange={(e) => setEditingPlayerName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") saveEditedPlayer();
+                              if (e.key === "Escape") cancelEditingPlayer();
+                            }}
+                            className="w-full rounded-lg bg-white px-3 py-2 text-slate-900 border border-slate-300 focus:border-emerald-500 outline-none"
+                            autoFocus
+                          />
+                          {config.algorithm === "balanced" && (
+                            <select
+                              value={editingPlayerSkill}
+                              onChange={(e) => setEditingPlayerSkill(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
+                              className="w-full rounded-lg bg-white px-3 py-2 text-slate-900 border border-slate-300 focus:border-emerald-500 outline-none"
+                            >
+                              <option value={1}>1 - Newbie</option>
+                              <option value={2}>2 - Beginner</option>
+                              <option value={3}>3 - Intermediate</option>
+                              <option value={4}>4 - Advanced</option>
+                              <option value={5}>5 - Pro</option>
+                            </select>
+                          )}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={saveEditedPlayer}
+                              className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 touch-manipulation"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={cancelEditingPlayer}
+                              className="flex-1 rounded-lg bg-slate-200 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-300 touch-manipulation"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex-1 min-w-0 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => startEditingPlayer(p)}
+                                className={`text-left font-medium hover:text-emerald-600 transition-colors truncate ${isPaused ? "text-slate-500" : "text-slate-900"}`}
+                              >
+                                {p.name}
+                              </button>
+                              <span className={`shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusColors[status] || statusColors.Waiting}`}>
+                                {status}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              {config.algorithm === "balanced" && !isPaused && (
+                                <select
+                                  value={p.skill}
+                                  onChange={(e) => {
+                                    const newSkill = Number(e.target.value) as 1 | 2 | 3 | 4 | 5;
+                                    updatePlayerSkill(p.id, newSkill);
+                                  }}
+                                  className="rounded-lg bg-white border border-slate-300 px-2 py-1 text-xs text-slate-800 focus:border-emerald-500 focus:outline-none touch-manipulation min-h-[32px]"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <option value={1}>1 - Newbie</option>
+                                  <option value={2}>2 - Beginner</option>
+                                  <option value={3}>3 - Intermediate</option>
+                                  <option value={4}>4 - Advanced</option>
+                                  <option value={5}>5 - Pro</option>
+                                </select>
+                              )}
+                              {isPaused ? (
+                                <button
+                                  type="button"
+                                  onClick={() => handleResumePlayer(p.id)}
+                                  className="rounded-lg bg-emerald-600/80 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[36px]"
+                                  aria-label={`Resume ${p.name}`}
+                                >
+                                  Resume
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePausePlayer(p.id)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300 touch-manipulation"
+                                  aria-label={`Pause ${p.name}`}
+                                >
+                                  <span className="text-lg leading-none" aria-hidden>⏸</span>
+                                </button>
+                              )}
+                              {showDeleteConfirm ? (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-slate-600 whitespace-nowrap">Remove?</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemovePlayer(p.id)}
+                                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600 text-white hover:bg-red-500 touch-manipulation"
+                                    aria-label={`Confirm remove ${p.name}`}
+                                  >
+                                    ✓
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDeleteConfirmId(null)}
+                                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300 touch-manipulation"
+                                    aria-label="Cancel"
+                                  >
+                                    ✕
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => setDeleteConfirmId(p.id)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-full bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-semibold touch-manipulation"
+                                  aria-label={`Delete ${p.name} (keeps scores)`}
+                                >
+                                  ×
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {sessionActive && (
+                            <div className="flex items-center gap-4 text-xs text-slate-500 pt-1 border-t border-slate-600/50">
+                              <span>GP: {p.gamesPlayed}</span>
+                              <span>Pts: {p.totalPoints}</span>
+                              <span>W: {p.wins}</span>
+                              <span>L: {p.losses}</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+              {players.filter((p) => p.status !== "removed").length === 0 && (
+                <p className="text-center text-slate-500 text-sm py-4">
+                  No players yet. Add above or select from Your regulars.
+                </p>
+              )}
+            </section>
+
+            {!sessionActive && (
+              <>
+                <button
+                  type="button"
+                  onClick={startSession}
+                  disabled={!canStartSession}
+                  className={`w-full rounded-xl py-4 sm:py-4 font-semibold touch-manipulation min-h-[52px] transition-all ${
+                    canStartSession
+                      ? "bg-emerald-600 text-white hover:bg-emerald-500 active:bg-emerald-700"
+                      : "bg-slate-200 text-slate-500 cursor-not-allowed opacity-60"
+                  }`}
+                >
+                  Start Session →
+                </button>
+                {!canStartSession && (
+                  <p className="text-center text-sm text-slate-600 mt-2">
+                    Add at least {config.courts * 4} player{config.courts * 4 > 1 ? "s" : ""} to start ({config.courts} court{config.courts > 1 ? "s" : ""}).
+                  </p>
+                )}
+              </>
             )}
           </div>
         )}
 
         {/* --- Session Screen --- */}
         {screen === "session" && (
-          <div className="space-y-6">
-            {activeCourts.length === 0 ? (
-              <div className="rounded-2xl bg-slate-800/50 p-6 text-center text-slate-400">
-                No active courts. Start a session from Setup.
+          <div className="min-h-screen bg-white">
+            {/* Tab nav for session screen */}
+            <nav className="sticky top-0 z-20 bg-white border-b border-gray-200 px-4 py-2">
+              <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setScreen("setup")}
+                  className={`flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] ${screen === "setup" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  Setup
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScreen("session")}
+                  className={`flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] ${screen === "session" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  Session
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScreen("schedule")}
+                  className={`flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] ${screen === "schedule" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  Schedule
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScreen("leaderboard")}
+                  className={`flex-1 min-w-0 rounded-md py-2 text-sm font-medium transition shrink-0 touch-manipulation min-h-[40px] ${screen === "leaderboard" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600 hover:text-gray-900"}`}
+                >
+                  Leaderboard
+                </button>
+              </div>
+            </nav>
+            {!sessionActive ? (
+              <div className="rounded-2xl bg-gray-100 p-6 text-center text-gray-600">
+                No active session. Start a session from Setup.
+              </div>
+            ) : !currentMatch ? (
+              <div className="rounded-2xl bg-gray-100 p-6 text-center text-gray-600">
+                No match found for Court {selectedCourt} in Round {currentRound}.
               </div>
             ) : (
               <>
-                {activeCourts.map((courtId) => {
-                  const roundIndex = (currentRoundPerCourt[courtId] ?? 1) - 1;
-                  const roundData = schedulePerCourt[courtId]?.[roundIndex];
-                  const matchup = roundData?.matchup;
-                  const scores = roundScoresPerCourt[courtId]?.[roundIndex];
-                  const hasMoreRounds = (currentRoundPerCourt[courtId] ?? 1) <= (schedulePerCourt[courtId]?.length ?? 0);
+                {/* Header Bar */}
+                <div className="sticky top-[60px] z-10 bg-white border-b border-gray-200 px-4 py-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-lg font-bold text-gray-900">Court {selectedCourt}</h2>
+                      <span className="text-sm text-gray-600">
+                        Round {currentRound} of {config.rounds}
+                      </span>
+                    </div>
+                    {/* Undo Button */}
+                    {undoStack.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={undoLastAction}
+                        className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 active:bg-gray-400 touch-manipulation min-h-[36px]"
+                        aria-label="Undo last action"
+                      >
+                        Undo
+                      </button>
+                    )}
+                  </div>
+                  
+                  {/* Progress Bar */}
+                  <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-green-600 transition-all duration-300"
+                      style={{ width: `${(currentRound / config.rounds) * 100}%` }}
+                    />
+                  </div>
+                </div>
 
-                  if (!matchup) {
-                    return (
-                      <section key={courtId} className="rounded-2xl bg-slate-800/50 p-4 border border-slate-700/50">
-                        <h3 className="text-sm font-semibold text-emerald-400/90 mb-2">Court {courtId}</h3>
-                        <p className="text-slate-400 text-sm">Not enough players for this court.</p>
-                      </section>
-                    );
-                  }
+                {/* Court Switcher Pills */}
+                {config.courts > 1 && (
+                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
+                    <div className="flex gap-2 overflow-x-auto pb-1">
+                      {Array.from({ length: config.courts }, (_, i) => i + 1).map((courtId) => {
+                        const match = currentRoundMatches.find((m) => m.court === courtId);
+                        const isSelected = selectedCourt === courtId;
+                        const isComplete = match?.status === "completed";
+                        const score = match?.score;
+                        return (
+                          <button
+                            key={courtId}
+                            type="button"
+                            onClick={() => setSelectedCourt(courtId)}
+                            className={`rounded-full px-4 py-2 text-sm font-semibold transition-all touch-manipulation min-h-[44px] shrink-0 ${
+                              isSelected
+                                ? "bg-green-600 text-white shadow-md"
+                                : "bg-white text-gray-700 border-2 border-gray-300"
+                            }`}
+                          >
+                            Court {courtId}
+                            {score && (
+                              <span className={`ml-2 text-xs ${isSelected ? "text-white/90" : "text-gray-600"}`}>
+                                {score.teamA}-{score.teamB}
+                              </span>
+                            )}
+                            {isComplete && <span className="ml-1.5">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
-                  const scoreA = scores?.scoreA ?? 0;
-                  const scoreB = scores?.scoreB ?? 0;
+                {/* Split-Screen Tap Zones */}
+                {(() => {
+                  const match = currentMatch;
+                  const score = match.score || { teamA: 0, teamB: 0 };
+                  const scoreA = score.teamA;
+                  const scoreB = score.teamB;
                   const totalScore = scoreA + scoreB;
-                  const isMatchComplete = totalScore === pointsPerMatch && totalScore > 0;
-                  const canIncrease = totalScore < pointsPerMatch;
+                  const isMatchComplete = totalScore === config.pointsPerMatch && totalScore > 0;
+                  const canIncrease = totalScore < config.pointsPerMatch;
                   const teamAWon = scoreA > scoreB;
-                  const canConfirm = scores && (scoreA > 0 || scoreB > 0);
+                  const canConfirm = scoreA > 0 || scoreB > 0;
+
+                  // Haptic feedback helper
+                  const vibrate = () => {
+                    if (typeof navigator !== "undefined" && navigator.vibrate) {
+                      navigator.vibrate(50);
+                    }
+                  };
 
                   return (
-                    <section key={courtId} className="rounded-2xl bg-slate-800/50 p-4 sm:p-5 border border-slate-700/50">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-                        <h3 className="text-base sm:text-sm font-semibold text-emerald-400/90">Court {courtId}</h3>
-                        <span className="text-sm sm:text-xs text-slate-500">
-                          Round {currentRoundPerCourt[courtId] ?? 1}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-4 items-start mb-4">
-                        <div className={`flex flex-col gap-2 p-3 rounded-xl transition ${isMatchComplete && teamAWon ? "bg-emerald-950/40 border-2 border-emerald-500" : ""}`}>
-                          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Team A</p>
-                          <p className="font-medium text-slate-100 text-sm leading-tight">
-                            {matchup.teamA.map((id) => getPlayer(id)?.name).join(" & ")}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoundScoresPerCourt((prev) => {
-                                  const courtScores = prev[courtId] ?? {};
-                                  const roundScores = courtScores[roundIndex] ?? { scoreA: 0, scoreB: 0 };
-                                  return {
-                                    ...prev,
-                                    [courtId]: {
-                                      ...courtScores,
-                                      [roundIndex]: {
-                                        ...roundScores,
-                                        scoreA: Math.max(0, roundScores.scoreA - 1),
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                              aria-label="Subtract 1 point for Team A"
-                            >
-                              −
-                            </button>
-                            <input
-                              type="number"
-                              min={0}
-                              max={pointsPerMatch}
-                              placeholder="0"
-                              value={scores?.scoreA ?? ""}
-                              onChange={(e) =>
-                                setRoundScoresPerCourt((prev) => {
-                                  const courtScores = prev[courtId] ?? {};
-                                  return {
-                                    ...prev,
-                                    [courtId]: {
-                                      ...courtScores,
-                                      [roundIndex]: {
-                                        ...courtScores[roundIndex],
-                                        scoreA: (() => {
-                                          const raw = Math.max(0, Math.min(pointsPerMatch, Number(e.target.value) || 0));
-                                          const currentB = courtScores[roundIndex]?.scoreB ?? 0;
-                                          return Math.min(raw, Math.max(0, pointsPerMatch - currentB));
-                                        })(),
-                                        scoreB: courtScores[roundIndex]?.scoreB ?? 0,
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoundScoresPerCourt((prev) => {
-                                  const courtScores = prev[courtId] ?? {};
-                                  const roundScores = courtScores[roundIndex] ?? { scoreA: 0, scoreB: 0 };
-                                  if (roundScores.scoreA + roundScores.scoreB >= pointsPerMatch) {
-                                    return prev;
-                                  }
-                                  return {
-                                    ...prev,
-                                    [courtId]: {
-                                      ...courtScores,
-                                      [roundIndex]: {
-                                        ...roundScores,
-                                        scoreA: Math.min(pointsPerMatch, roundScores.scoreA + 1),
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                              disabled={!canIncrease}
-                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                              aria-label="Add 1 point for Team A"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                        <div className={`flex flex-col gap-2 p-3 rounded-xl transition ${isMatchComplete && !teamAWon ? "bg-emerald-950/40 border-2 border-emerald-500" : ""}`}>
-                          <p className="text-xs font-medium text-slate-500 uppercase tracking-wide">Team B</p>
-                          <p className="font-medium text-slate-100 text-sm leading-tight">
-                            {matchup.teamB.map((id) => getPlayer(id)?.name).join(" & ")}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoundScoresPerCourt((prev) => {
-                                  const courtScores = prev[courtId] ?? {};
-                                  const roundScores = courtScores[roundIndex] ?? { scoreA: 0, scoreB: 0 };
-                                  return {
-                                    ...prev,
-                                    [courtId]: {
-                                      ...courtScores,
-                                      [roundIndex]: {
-                                        ...roundScores,
-                                        scoreB: Math.max(0, roundScores.scoreB - 1),
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-600 hover:bg-slate-500 active:bg-slate-700 text-slate-200 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                              aria-label="Subtract 1 point for Team B"
-                            >
-                              −
-                            </button>
-                            <input
-                              type="number"
-                              min={0}
-                              max={pointsPerMatch}
-                              placeholder="0"
-                              value={scores?.scoreB ?? ""}
-                              onChange={(e) =>
-                                setRoundScoresPerCourt((prev) => {
-                                  const courtScores = prev[courtId] ?? {};
-                                  return {
-                                    ...prev,
-                                    [courtId]: {
-                                      ...courtScores,
-                                      [roundIndex]: {
-                                        ...courtScores[roundIndex],
-                                        scoreA: courtScores[roundIndex]?.scoreA ?? 0,
-                                        scoreB: (() => {
-                                          const raw = Math.max(0, Math.min(pointsPerMatch, Number(e.target.value) || 0));
-                                          const currentA = courtScores[roundIndex]?.scoreA ?? 0;
-                                          return Math.min(raw, Math.max(0, pointsPerMatch - currentA));
-                                        })(),
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                              className="flex-1 min-w-0 rounded-xl bg-slate-700 px-4 py-3 text-center text-lg font-semibold text-white border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setRoundScoresPerCourt((prev) => {
-                                  const courtScores = prev[courtId] ?? {};
-                                  const roundScores = courtScores[roundIndex] ?? { scoreA: 0, scoreB: 0 };
-                                  if (roundScores.scoreA + roundScores.scoreB >= pointsPerMatch) {
-                                    return prev;
-                                  }
-                                  return {
-                                    ...prev,
-                                    [courtId]: {
-                                      ...courtScores,
-                                      [roundIndex]: {
-                                        ...roundScores,
-                                        scoreB: Math.min(pointsPerMatch, roundScores.scoreB + 1),
-                                      },
-                                    },
-                                  };
-                                })
-                              }
-                              disabled={!canIncrease}
-                              className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                              aria-label="Add 1 point for Team B"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                      <p className="text-xs text-slate-500 mb-3">Max {pointsPerMatch} points per team</p>
-                      {isMatchComplete && (
-                        <div className="mb-3 p-3 rounded-xl bg-emerald-950/30 border border-emerald-500/50">
-                          <p className="text-sm font-semibold text-emerald-400 text-center">
-                            🏆 {teamAWon ? "Team A wins!" : "Team B wins!"} ({scoreA}-{scoreB})
-                          </p>
-                        </div>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleConfirmCourtScore(courtId)}
-                        disabled={!canConfirm}
-                        className="w-full rounded-xl bg-emerald-600 py-3.5 sm:py-2.5 text-base sm:text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[48px]"
+                    <div className="flex flex-col h-[calc(100vh-180px)] min-h-[600px]">
+                      {/* Team A Tap Zone - Top Half */}
+                      <div
+                        onClick={() => {
+                          if (!canIncrease || !match) return;
+                          vibrate();
+                          const newScore = {
+                            teamA: Math.min(config.pointsPerMatch, scoreA + 1),
+                            teamB: scoreB,
+                          };
+                          updateMatchScore(currentRound, match.id, newScore);
+                        }}
+                        className={`relative flex-1 flex flex-col items-center justify-center p-6 transition-all touch-manipulation cursor-pointer ${
+                          isMatchComplete && teamAWon
+                            ? "bg-green-100 border-t-4 border-b-2 border-green-600"
+                            : isMatchComplete
+                            ? "bg-gray-100 border-t-4 border-b-2 border-gray-300"
+                            : "bg-white hover:bg-gray-50 active:bg-green-50 border-t-4 border-b-2 border-gray-200"
+                        } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        {isMatchComplete
-                          ? `Log Match (Court ${courtId})`
-                          : hasMoreRounds
-                          ? `Confirm & next round (Court ${courtId})`
-                          : `Confirm (Court ${courtId} - final round)`}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => skipMatchAndRegenerate(courtId)}
-                        className="w-full rounded-xl bg-slate-700 py-3 sm:py-2 text-sm text-slate-300 hover:bg-slate-600 mt-2 touch-manipulation min-h-[44px]"
+                        {/* Small -1 button in top-right corner */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!match) return;
+                            vibrate();
+                            const newScore = { teamA: Math.max(0, scoreA - 1), teamB: scoreB };
+                            updateMatchScore(currentRound, match.id, newScore);
+                          }}
+                          className="absolute top-3 right-3 w-10 h-10 rounded-lg bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700 text-lg font-bold flex items-center justify-center touch-manipulation shadow-sm z-10"
+                          aria-label="Subtract 1 point for Team A"
+                        >
+                          −
+                        </button>
+
+                        <p className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                          Team A
+                        </p>
+                        <p className="text-base font-semibold text-gray-900 mb-6 text-center px-4">
+                          {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                        </p>
+                        <div className={`text-[72px] sm:text-[96px] font-bold ${isMatchComplete && teamAWon ? "text-green-600" : "text-gray-900"}`}>
+                          {scoreA}
+                        </div>
+                        {isMatchComplete && teamAWon && (
+                          <p className="mt-4 text-xl font-bold text-green-600">
+                            🏆 Winner!
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Divider */}
+                      <div className="h-1 bg-gray-300"></div>
+
+                      {/* Team B Tap Zone - Bottom Half */}
+                      <div
+                        onClick={() => {
+                          if (!canIncrease || !match) return;
+                          vibrate();
+                          const newScore = {
+                            teamA: scoreA,
+                            teamB: Math.min(config.pointsPerMatch, scoreB + 1),
+                          };
+                          updateMatchScore(currentRound, match.id, newScore);
+                        }}
+                        className={`relative flex-1 flex flex-col items-center justify-center p-6 transition-all touch-manipulation cursor-pointer ${
+                          isMatchComplete && !teamAWon
+                            ? "bg-green-100 border-t-2 border-b-4 border-green-600"
+                            : isMatchComplete
+                            ? "bg-gray-100 border-t-2 border-b-4 border-gray-300"
+                            : "bg-white hover:bg-gray-50 active:bg-green-50 border-t-2 border-b-4 border-gray-200"
+                        } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        Skip match & regenerate (Court {courtId})
-                      </button>
-                    </section>
+                        {/* Small -1 button in bottom-right corner */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!match) return;
+                            vibrate();
+                            const newScore = { teamA: scoreA, teamB: Math.max(0, scoreB - 1) };
+                            updateMatchScore(currentRound, match.id, newScore);
+                          }}
+                          className="absolute bottom-3 right-3 w-10 h-10 rounded-lg bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700 text-lg font-bold flex items-center justify-center touch-manipulation shadow-sm z-10"
+                          aria-label="Subtract 1 point for Team B"
+                        >
+                          −
+                        </button>
+
+                        <p className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">
+                          Team B
+                        </p>
+                        <p className="text-base font-semibold text-gray-900 mb-6 text-center px-4">
+                          {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                        </p>
+                        <div className={`text-[72px] sm:text-[96px] font-bold ${isMatchComplete && !teamAWon ? "text-green-600" : "text-gray-900"}`}>
+                          {scoreB}
+                        </div>
+                        {isMatchComplete && !teamAWon && (
+                          <p className="mt-4 text-xl font-bold text-green-600">
+                            🏆 Winner!
+                          </p>
+                        )}
+                      </div>
+                    </div>
                   );
-                })}
+                })()}
 
-                {canAddCourt && (
-                  <section className="rounded-2xl bg-slate-800/50 p-4 border border-emerald-500/50">
-                    <p className="text-sm text-slate-300 mb-3">
-                      Enough players for another court! ({players.length} players, need {(activeCourts.length + 1) * 4})
-                    </p>
-                    <button
-                      type="button"
-                      onClick={addCourt}
-                      className="w-full rounded-xl bg-emerald-600 py-3 sm:py-2.5 font-semibold text-white hover:bg-emerald-500 touch-manipulation min-h-[48px] sm:min-h-0"
-                    >
-                      Add Court {activeCourts.length + 1}
-                    </button>
-                  </section>
-                )}
+                {/* Bottom Controls Bar */}
+                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 space-y-2">
+                  {/* Match Complete Banner */}
+                  {(() => {
+                    const match = currentMatch;
+                    const score = match?.score || { teamA: 0, teamB: 0 };
+                    const scoreA = score.teamA;
+                    const scoreB = score.teamB;
+                    const totalScore = scoreA + scoreB;
+                    const isMatchComplete = totalScore === config.pointsPerMatch && totalScore > 0;
+                    const teamAWon = scoreA > scoreB;
+                    const canConfirm = scoreA > 0 || scoreB > 0;
 
+                    return (
+                      <>
+                        {isMatchComplete && (
+                          <div className="p-3 rounded-xl bg-green-100 border-2 border-green-600 mb-2">
+                            <p className="text-base font-bold text-green-800 text-center">
+                              🏆 {teamAWon ? "Team A wins!" : "Team B wins!"} ({scoreA}-{scoreB})
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!currentMatch || !currentRoundData) return;
+                              // Regenerate only current round's matchups
+                              const updatedPlayers = useStore.getState().players;
+                              const previousRounds = schedule.filter((r) => r.roundNumber < currentRound);
+                              const { matches, sittingOut } = generateRoundMatchups(
+                                updatedPlayers,
+                                config.courts,
+                                config.algorithm,
+                                previousRounds,
+                                currentRound
+                              );
+                              
+                              // Update only the current round
+                              setSchedule(
+                                schedule.map((round) =>
+                                  round.roundNumber === currentRound
+                                    ? { ...round, matches, sittingOut }
+                                    : round
+                                )
+                              );
+                            }}
+                            className="flex-1 rounded-xl bg-gray-200 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-300 active:bg-gray-400 touch-manipulation min-h-[48px]"
+                          >
+                            Reshuffle match
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!currentMatch) return;
+                              completeMatch(currentRound, currentMatch.id);
+                              // Check if all matches in round are complete, then advance
+                              const allComplete = currentRoundMatches.every(
+                                (m) => m.status === "completed" || m.id === currentMatch.id
+                              );
+                              if (allComplete && currentRound < config.rounds) {
+                                setCurrentRound(currentRound + 1);
+                                setSelectedCourt(1);
+                              }
+                            }}
+                            disabled={!canConfirm}
+                            className="flex-1 rounded-xl bg-green-600 py-3 text-sm font-semibold text-white hover:bg-green-700 active:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[48px]"
+                          >
+                            {isMatchComplete
+                              ? `Log Match`
+                              : currentRound < config.rounds
+                              ? `Confirm & Next`
+                              : `Confirm (Final)`}
+                          </button>
+                        </div>
+
+                        <p className="text-xs text-gray-500 text-center">
+                          Total: {totalScore} / {config.pointsPerMatch} points
+                        </p>
+                      </>
+                    );
+                  })()}
+                </div>
+
+                {/* Sitting Out Section */}
                 {allSittingOut.length > 0 && (
-                  <section className="rounded-2xl bg-slate-800/30 p-4">
-                    <h3 className="text-sm font-semibold text-slate-400 mb-2">Sitting out</h3>
-                    <p className="text-slate-300">
+                  <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
+                    <h3 className="text-sm font-semibold text-gray-600 mb-1">Sitting out</h3>
+                    <p className="text-sm text-gray-700">
                       {allSittingOut.map((id) => getPlayer(id)?.name).join(", ")}
                     </p>
-                  </section>
+                  </div>
                 )}
-
-            <p className="text-xs text-slate-500 text-center">
-              Americano: each player gets their team&apos;s score as individual points.
-            </p>
               </>
             )}
           </div>
@@ -1130,38 +1238,33 @@ export default function Home() {
         {/* --- Schedule Screen --- */}
         {screen === "schedule" && (
           <div className="space-y-4">
-            <p className="text-sm text-slate-400">
-              Full session schedule per court. Each court progresses independently.
+            <p className="text-sm text-slate-600">
+              Full cross-court rotation per round. Each round shows all courts; players move to different courts next round.
             </p>
             
             {/* Filter chips */}
-            {activeCourts.length > 0 && (
+            {config.courts > 1 && (
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    setScheduleFilterCourts(new Set());
-                  }}
-                    className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
-                      scheduleFilterCourts.size === 0
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-700 text-slate-300"
-                    }`}
+                  onClick={() => setScheduleFilterCourts(new Set())}
+                  className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
+                    scheduleFilterCourts.size === 0
+                      ? "bg-emerald-600 text-white"
+                      : "bg-slate-200 text-slate-700"
+                  }`}
                 >
                   All
                 </button>
-                {activeCourts.map((courtId) => (
+                {Array.from({ length: config.courts }, (_, i) => i + 1).map((courtId) => (
                   <button
                     key={courtId}
                     type="button"
-                    onClick={() => {
-                      // Clicking a court chip shows only that court
-                      setScheduleFilterCourts(new Set([courtId]));
-                    }}
+                    onClick={() => setScheduleFilterCourts(new Set([courtId]))}
                     className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
                       scheduleFilterCourts.has(courtId)
                         ? "bg-emerald-600 text-white"
-                        : "bg-slate-700 text-slate-300 opacity-50"
+                        : "bg-slate-200 text-slate-600"
                     }`}
                   >
                     Court {courtId}
@@ -1170,101 +1273,84 @@ export default function Home() {
               </div>
             )}
 
-            {activeCourts.length === 0 ? (
-              <div className="rounded-2xl bg-slate-800/50 p-6 text-center text-slate-400">
+            {schedule.length === 0 ? (
+              <div className="rounded-2xl bg-slate-100 border border-slate-200 p-6 text-center text-slate-600">
                 No schedule yet. Start a session from Setup.
               </div>
             ) : (
-              <div className="space-y-6">
-                {activeCourts
-                  .filter((courtId) => scheduleFilterCourts.size === 0 || scheduleFilterCourts.has(courtId))
-                  .map((courtId) => {
-                    const schedule = schedulePerCourt[courtId] ?? [];
-                    const currentRound = currentRoundPerCourt[courtId] ?? 1;
-                    
-                    return (
-                      <div key={courtId} className="space-y-3">
-                        <h2 className="text-lg font-semibold text-emerald-400">Court {courtId}</h2>
-                        {schedule.length === 0 ? (
-                          <div className="rounded-2xl bg-slate-800/50 p-4 text-center text-slate-400 text-sm">
-                            No schedule for this court.
-                          </div>
-                        ) : (
-                          schedule.map((roundData, index) => {
-                            const roundNum = index + 1;
-                            const isCurrent = roundNum === currentRound;
-                            const isPast = roundNum < currentRound;
-                            
-                            if (!roundData.matchup) {
-                              return (
-                                <section
-                                  key={roundNum}
-                                  className="rounded-2xl border border-slate-700/50 bg-slate-800/30 p-4 opacity-60"
-                                >
-                                  <h3 className="text-sm font-semibold mb-2">
-                                    Round {roundNum} <span className="text-xs font-normal text-slate-500">(not enough players)</span>
-                                  </h3>
-                                </section>
-                              );
-                            }
-                            
-                            const matchResult = matchResults[courtId]?.[index];
-                            
-                            return (
-                              <section
-                                key={roundNum}
-                                className={`rounded-2xl border p-4 ${
-                                  isCurrent
-                                    ? "border-emerald-500 bg-emerald-950/30"
-                                    : isPast
-                                    ? "border-slate-700/50 bg-slate-800/30 opacity-80"
-                                    : "border-slate-700/50 bg-slate-800/50"
-                                }`}
-                              >
-                                <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
-                                  Round {roundNum}
-                                  {isCurrent && <span className="text-xs font-normal text-emerald-400">(current)</span>}
-                                  {isPast && <span className="text-xs font-normal text-slate-500">(played)</span>}
-                                </h3>
-                                <div className="text-sm space-y-2">
-                                  <div className={`flex flex-wrap items-center gap-2 ${matchResult && matchResult.teamAWon ? "text-emerald-400" : ""}`}>
-                                    <span className={`font-medium ${matchResult && matchResult.teamAWon ? "text-emerald-400" : "text-slate-300"}`}>
-                                      {roundData.matchup!.teamA.map((id) => getPlayer(id)?.name).join(" & ")}
+              <div className="space-y-4">
+                {schedule.map((round) => {
+                  const isCurrent = round.roundNumber === currentRound;
+                  const isPast = round.roundNumber < currentRound;
+                  // Full cross-court rotation: show all courts 1..N in order for this round
+                  const matchesByCourt = new Map(round.matches.map((m) => [m.court, m]));
+                  const courtsToShow = scheduleFilterCourts.size === 0
+                    ? Array.from({ length: config.courts }, (_, i) => i + 1)
+                    : Array.from({ length: config.courts }, (_, i) => i + 1).filter((c) => scheduleFilterCourts.has(c));
+
+                  return (
+                    <section
+                      key={round.roundNumber}
+                      className={`rounded-2xl border p-4 ${
+                        isCurrent
+                          ? "border-emerald-500 bg-emerald-50"
+                          : isPast
+                          ? "border-slate-200 bg-slate-50 opacity-90"
+                          : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-slate-800">
+                        Round {round.roundNumber} — Cross-court rotation
+                        {isCurrent && <span className="text-xs font-normal text-emerald-600">(current)</span>}
+                        {isPast && <span className="text-xs font-normal text-slate-500">(played)</span>}
+                      </h3>
+                      <div className="space-y-3">
+                        {courtsToShow.map((courtId) => {
+                          const match = matchesByCourt.get(courtId);
+                          if (!match) return null;
+                          const score = match.score;
+                          const isComplete = match.status === "completed";
+                          const teamAWon = score && score.teamA > score.teamB;
+                          return (
+                            <div key={match.id} className="text-sm space-y-1 pl-2 border-l-2 border-slate-300">
+                              <div className="font-medium text-slate-500 text-xs">Court {courtId}</div>
+                              <div className={`flex flex-wrap items-center gap-2 ${isComplete && teamAWon ? "text-emerald-600" : ""}`}>
+                                <span className={`font-medium ${isComplete && teamAWon ? "text-emerald-600" : "text-slate-800"}`}>
+                                  {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                </span>
+                                <span className="text-slate-500">vs</span>
+                                <span className={`font-medium ${isComplete && !teamAWon ? "text-emerald-600" : "text-slate-800"}`}>
+                                  {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                </span>
+                              </div>
+                              {score && (
+                                <div className="pt-1">
+                                  <p className="text-base font-semibold">
+                                    <span className={teamAWon ? "text-emerald-600" : "text-slate-600"}>
+                                      {score.teamA}
                                     </span>
-                                    <span className="text-slate-500">vs</span>
-                                    <span className={`font-medium ${matchResult && !matchResult.teamAWon ? "text-emerald-400" : "text-slate-300"}`}>
-                                      {roundData.matchup!.teamB.map((id) => getPlayer(id)?.name).join(" & ")}
+                                    <span className="text-slate-400 mx-2">-</span>
+                                    <span className={!teamAWon ? "text-emerald-600" : "text-slate-600"}>
+                                      {score.teamB}
                                     </span>
-                                  </div>
-                                  {matchResult && (
-                                    <div className="pt-2 border-t border-slate-700/50">
-                                      <p className="text-base font-semibold">
-                                        <span className={matchResult.teamAWon ? "text-emerald-400" : "text-slate-400"}>
-                                          {matchResult.scoreA}
-                                        </span>
-                                        <span className="text-slate-500 mx-2">-</span>
-                                        <span className={!matchResult.teamAWon ? "text-emerald-400" : "text-slate-400"}>
-                                          {matchResult.scoreB}
-                                        </span>
-                                        <span className="text-slate-500 ml-2 text-sm font-normal">
-                                          ({matchResult.teamAWon ? "Team A wins" : "Team B wins"})
-                                        </span>
-                                      </p>
-                                    </div>
-                                  )}
-                                </div>
-                                {roundData.sittingOut.length > 0 && (
-                                  <p className="text-xs text-slate-500 mt-2">
-                                    Sit out: {roundData.sittingOut.map((id) => getPlayer(id)?.name).join(", ")}
+                                    <span className="text-slate-500 ml-2 text-sm font-normal">
+                                      ({teamAWon ? "Team A wins" : "Team B wins"})
+                                    </span>
                                   </p>
-                                )}
-                              </section>
-                            );
-                          })
-                        )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
-                    );
-                  })}
+                      {round.sittingOut.length > 0 && (
+                        <p className="text-xs text-slate-500 mt-3 pt-2 border-t border-slate-200">
+                          Sit out: {round.sittingOut.map((id) => getPlayer(id)?.name).join(", ")}
+                        </p>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1273,13 +1359,13 @@ export default function Home() {
         {/* --- Leaderboard Screen --- */}
         {screen === "leaderboard" && (
           <div className="space-y-4">
-            <div className="rounded-2xl overflow-hidden border border-slate-700/50">
+            <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white">
               <table className="w-full text-left">
                 <thead>
-                  <tr className="bg-slate-800 text-slate-400 text-xs uppercase tracking-wider">
+                  <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
                     <th className="py-3 pl-4 font-semibold">#</th>
                     <th className="py-3 font-semibold">Name</th>
-                    <th className="py-3 font-semibold text-center">GP</th>
+                    <th className="py-3 font-semibold text-center">Matches Played</th>
                     <th className="py-3 font-semibold text-right pr-4">Pts</th>
                     <th className="py-3 font-semibold text-center">W</th>
                     <th className="py-3 font-semibold text-center">L</th>
@@ -1291,21 +1377,21 @@ export default function Home() {
                     return (
                     <tr
                       key={p.id}
-                      className={`border-t border-slate-700/50 ${i < 3 ? "bg-slate-800/40" : ""}`}
+                      className={`border-t border-slate-200 ${i < 3 ? "bg-amber-50/60" : ""}`}
                     >
-                      <td className="py-3 pl-4 font-bold text-slate-400 w-10">
+                      <td className="py-3 pl-4 font-bold text-slate-600 w-10">
                         {i + 1}
                       </td>
-                      <td className="py-3 font-medium text-white">
+                      <td className="py-3 font-medium text-slate-900">
                         {medal}
                         {p.name}
                       </td>
-                      <td className="py-3 text-center text-slate-300">{p.gamesPlayed}</td>
-                      <td className="py-3 text-right pr-4 font-semibold text-emerald-400">
+                      <td className="py-3 text-center text-slate-700">{p.gamesPlayed}</td>
+                      <td className="py-3 text-right pr-4 font-semibold text-emerald-600">
                         {p.totalPoints}
                       </td>
-                      <td className="py-3 text-center text-green-400/90">{p.wins}</td>
-                      <td className="py-3 text-center text-red-400/80">{p.losses}</td>
+                      <td className="py-3 text-center text-green-600">{p.wins}</td>
+                      <td className="py-3 text-center text-red-600">{p.losses}</td>
                     </tr>
                     );
                   })}
@@ -1316,10 +1402,22 @@ export default function Home() {
               <p className="text-center text-slate-500 py-8">No players yet. Add players in Setup.</p>
             )}
             <p className="text-xs text-slate-500 text-center">
-              Sorted by total Americano points, then wins. GP = games played.
+              Sorted by total Americano points, then wins.
             </p>
           </div>
         )}
+      </div>
+
+      {/* Toast notifications */}
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 pointer-events-none w-[min(100%-2rem,24rem)]">
+        {toasts.map((t) => (
+          <div
+            key={t.id}
+            className="rounded-lg bg-gray-900 text-white text-sm font-medium px-4 py-2.5 shadow-lg border border-gray-700"
+          >
+            {t.message}
+          </div>
+        ))}
       </div>
     </div>
   );
