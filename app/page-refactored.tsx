@@ -69,7 +69,8 @@ export default function Home() {
 
     storeAddPlayer(uniqueName, skillToUse);
 
-    // If session is active, regenerate schedule (use store's updated players so new player has correct id and status)
+    // If session is active, regenerate schedule. Use store's updated players so the new player
+    // has a valid id and status (PlayerStatus is "active" | "paused" | "sitting_out" | "removed").
     if (sessionActive) {
       const updatedPlayers = useStore.getState().players;
       const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
