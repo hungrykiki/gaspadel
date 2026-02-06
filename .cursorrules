@@ -1,0 +1,5 @@
+You are helping me build a Next.js app with TypeScript and Tailwind.
+Keep code simple and readable.
+Use functional components with hooks.
+Add brief comments explaining non-obvious logic.
+Prefer server components unless client interactivity is needed.
