@@ -93,7 +93,6 @@ export interface AppState {
   completeMatch: (roundNumber: number, matchId: string) => void;
   addUndoAction: (action: string, payload: any) => void;
   clearUndoStack: () => void;
-  regenerateSchedule: () => void;
   undoLastAction: () => void;
 }
 
