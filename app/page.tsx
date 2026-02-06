@@ -79,10 +79,12 @@ export default function Home() {
   const [editingPlayerSkill, setEditingPlayerSkill] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [selectedCourt, setSelectedCourt] = useState<number>(1);
   const [scheduleFilterCourts, setScheduleFilterCourts] = useState<Set<number>>(new Set());
-  const [configCollapsed, setConfigCollapsed] = useState<boolean>(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [regularsSelected, setRegularsSelected] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
+  const [sessionDuration, setSessionDuration] = useState<number>(90);
+  const [durationOptions, setDurationOptions] = useState<number[]>([30, 60, 90, 120]);
+  const [showAdvancedOverrides, setShowAdvancedOverrides] = useState<boolean>(false);
 
   const addToast = useCallback((message: string) => {
     const id = Math.random().toString(36).slice(2, 9);
@@ -288,15 +290,37 @@ export default function Home() {
     return currentRoundData?.sittingOut || [];
   }, [currentRoundData]);
 
-  // Calculate estimated session time (in minutes)
-  // Assumes ~8-10 minutes per match on average
-  const estimatedSessionTime = useMemo(() => {
-    const matchesPerRound = config.courts;
-    const totalMatches = matchesPerRound * config.rounds;
-    const avgMatchTime = 8; // minutes per match
-    const totalTime = totalMatches * avgMatchTime;
-    return Math.round(totalTime);
-  }, [config.courts, config.rounds]);
+  // Auto-calculation: ~8 min/match at 21pts, ~5 min at 16pts, ~12 min at 32pts
+  const minPerMatchForPoints = useCallback((pts: number) => {
+    if (pts <= 16) return 5;
+    if (pts <= 21) return 8;
+    return 12;
+  }, []);
+
+  const autoRounds = useMemo(
+    () =>
+      Math.max(
+        1,
+        Math.min(
+          99,
+          Math.round(sessionDuration / minPerMatchForPoints(config.pointsPerMatch))
+        )
+      ),
+    [sessionDuration, config.pointsPerMatch]
+  );
+  const effectiveRounds = showAdvancedOverrides ? config.rounds : autoRounds;
+  const effectivePoints = config.pointsPerMatch;
+  const effectiveMinPerMatch = minPerMatchForPoints(effectivePoints);
+  const avgGamesPerPlayer =
+    activePlayers.length > 0
+      ? Math.round((effectiveRounds * config.courts * 4) / activePlayers.length)
+      : 0;
+
+  // Sync auto rounds to config when duration or match length changes and not in Advanced (recalculates live)
+  useEffect(() => {
+    if (sessionActive || showAdvancedOverrides) return;
+    setConfig({ rounds: autoRounds });
+  }, [sessionDuration, config.pointsPerMatch, showAdvancedOverrides, sessionActive, autoRounds, setConfig]);
 
   // Get player status for display
   const getPlayerStatus = useCallback((player: Player): "Playing" | "Waiting" | "Paused" | "Joining next round" | "Sitting out" => {
@@ -334,23 +358,6 @@ export default function Home() {
     return "Waiting";
   }, [sessionActive, currentRound, currentRoundData]);
 
-  // Preset configurations
-  const applyPreset = useCallback((preset: "quick" | "standard" | "long") => {
-    const presets = {
-      quick: { rounds: 6, pointsPerMatch: 16 },
-      standard: { rounds: 10, pointsPerMatch: 21 },
-      long: { rounds: 14, pointsPerMatch: 32 },
-    };
-    
-    const presetConfig = presets[preset];
-    setConfig(presetConfig);
-    
-    if (sessionActive) {
-      // Regenerate from NEXT round to preserve current round in progress
-      const newSchedule = regenerateSchedule(players, { ...config, ...presetConfig }, schedule, currentRound + 1);
-      setSchedule(newSchedule);
-    }
-  }, [config, sessionActive, players, schedule, currentRound, setConfig, setSchedule]);
 
   return (
     <div className="min-h-screen font-sans bg-gray-50 text-gray-900">
@@ -381,181 +388,142 @@ export default function Home() {
               </div>
             )}
 
-            {/* Preset Buttons */}
+            {/* Config: 3 inputs (Courts, Duration, Match length) + summary + Advanced */}
             {!sessionActive && (
-              <section className="rounded-2xl bg-white border border-slate-200 p-4">
-                <h2 className="text-sm font-semibold text-slate-800 mb-3">Quick Presets</h2>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => applyPreset("quick")}
-                    className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
-                      config.rounds === 6 && config.pointsPerMatch === 16
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-200 text-slate-800 hover:bg-slate-300"
-                    }`}
-                  >
-                    <div className="font-semibold">Quick</div>
-                    <div className="text-xs opacity-80 mt-0.5">6 rounds, 16pts</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyPreset("standard")}
-                    className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
-                      config.rounds === 10 && config.pointsPerMatch === 21
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-200 text-slate-800 hover:bg-slate-300"
-                    }`}
-                  >
-                    <div className="font-semibold">Standard</div>
-                    <div className="text-xs opacity-80 mt-0.5">10 rounds, 21pts</div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => applyPreset("long")}
-                    className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
-                      config.rounds === 14 && config.pointsPerMatch === 32
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-200 text-slate-800 hover:bg-slate-300"
-                    }`}
-                  >
-                    <div className="font-semibold">Long</div>
-                    <div className="text-xs opacity-80 mt-0.5">14 rounds, 32pts</div>
-                  </button>
-                </div>
-              </section>
-            )}
-
-            {/* Estimated Session Time */}
-            <section className="rounded-2xl bg-white border border-slate-200 p-4">
-              <div className="flex items-center justify-between">
+              <section className="rounded-2xl bg-white border border-slate-200 p-4 space-y-4">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800">Estimated Time</h2>
-                  <p className="text-xs text-slate-600 mt-1">
-                    ~{estimatedSessionTime} min with {activePlayers.length} player{activePlayers.length !== 1 ? "s" : ""} on {config.courts} court{config.courts > 1 ? "s" : ""}
-                  </p>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-2">Courts</h2>
+                  <div className="flex gap-2">
+                    {([1, 2, 3, 4] as const).map((n) => (
+                      <button
+                        key={n}
+                        type="button"
+                        onClick={() => setConfig({ courts: n })}
+                        className={`flex-1 rounded-xl py-3 text-sm font-semibold transition touch-manipulation ${
+                          config.courts === n
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
+                      >
+                        {n}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            </section>
 
-            {/* Collapsible Config Section */}
-            <section className="rounded-2xl bg-white border border-slate-200 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => setConfigCollapsed(!configCollapsed)}
-                className="w-full flex items-center justify-between p-4 hover:bg-slate-50 transition-colors touch-manipulation"
-              >
-                <h2 className="text-sm font-semibold text-slate-800">Configuration</h2>
-                <span className="text-slate-500 text-lg">
-                  {configCollapsed ? "▼" : "▲"}
-                </span>
-              </button>
-              
-              {!configCollapsed && (
-                <div className="px-4 pb-4 space-y-4">
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Max Courts</h3>
-                    <p className="text-xs text-slate-600 mb-2">
-                      Start with available players. Add more courts when enough players arrive.
-                    </p>
-                    <div className="flex items-center gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-2">Duration</h2>
+                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
+                    {durationOptions.map((mins) => (
                       <button
+                        key={mins}
                         type="button"
-                        onClick={() => setConfig({ courts: Math.max(1, config.courts - 1) })}
-                        disabled={config.courts === 1}
-                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-200 hover:bg-slate-300 active:bg-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                        aria-label="Decrease max courts"
+                        onClick={() => setSessionDuration(mins)}
+                        className={`shrink-0 rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                          sessionDuration === mins
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
                       >
-                        −
+                        {mins} min
                       </button>
-                      <div className="flex-1 min-w-0 rounded-xl bg-slate-100 px-4 py-3 text-center text-lg font-semibold text-slate-900 border border-slate-300">
-                        {config.courts} court{config.courts > 1 ? "s" : ""}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setConfig({ courts: Math.min(10, config.courts + 1) })}
-                        disabled={config.courts === 10}
-                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                        aria-label="Increase max courts"
-                      >
-                        +
-                      </button>
-                    </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = durationOptions[durationOptions.length - 1] + 30;
+                        setDurationOptions((prev) => [...prev, next]);
+                        setSessionDuration(next);
+                      }}
+                      className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition touch-manipulation"
+                      aria-label="Add 30 minutes"
+                    >
+                      +
+                    </button>
                   </div>
+                </div>
 
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Points per match</h3>
-                    <div className="flex items-center gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-800 mb-2">Match length</h2>
+                  <div className="flex gap-2 flex-wrap">
+                    {[
+                      { label: "Short (16pts)", pts: 16 },
+                      { label: "Standard (21pts)", pts: 21 },
+                      { label: "Long (32pts)", pts: 32 },
+                    ].map(({ label, pts }) => (
                       <button
+                        key={pts}
                         type="button"
-                        onClick={() => setConfig({ pointsPerMatch: Math.max(1, config.pointsPerMatch - 1) })}
-                        disabled={config.pointsPerMatch === 1}
-                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-200 hover:bg-slate-300 active:bg-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                        aria-label="Decrease points per match"
+                        onClick={() => setConfig({ pointsPerMatch: pts })}
+                        className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                          config.pointsPerMatch === pts
+                            ? "bg-emerald-600 text-white"
+                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                        }`}
                       >
-                        −
+                        {label}
                       </button>
-                      <div className="flex-1 min-w-0 rounded-xl bg-slate-100 px-4 py-3 text-center text-lg font-semibold text-slate-900 border border-slate-300">
-                        {config.pointsPerMatch}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setConfig({ pointsPerMatch: Math.min(64, config.pointsPerMatch + 1) })}
-                        disabled={config.pointsPerMatch === 64}
-                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                        aria-label="Increase points per match"
-                      >
-                        +
-                      </button>
-                    </div>
+                    ))}
                   </div>
+                </div>
 
-                  <div>
+                <p className="text-sm text-slate-700 font-medium">
+                  ~{effectiveRounds} rounds, ~{effectiveMinPerMatch} min per match, everyone plays ~{avgGamesPerPlayer} games
+                </p>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-sm text-slate-600">Advanced</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowAdvancedOverrides((v) => !v);
+                      if (!showAdvancedOverrides) return;
+                      setConfig({ rounds: autoRounds });
+                    }}
+                    className={`relative rounded-full w-11 h-6 transition-colors touch-manipulation ${
+                      showAdvancedOverrides ? "bg-emerald-600" : "bg-slate-200"
+                    }`}
+                    aria-label="Toggle advanced overrides"
+                  >
+                    <span
+                      className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                        showAdvancedOverrides ? "left-6" : "left-1"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                {showAdvancedOverrides && (
+                  <div className="pt-2 border-t border-slate-200">
                     <h3 className="text-xs font-semibold text-slate-600 mb-2">Number of rounds</h3>
-                    {sessionActive && (
-                      <p className="text-xs text-amber-600 mb-2">⚠️ Schedule will regenerate for remaining rounds.</p>
-                    )}
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={() => {
-                    setConfig({ rounds: Math.max(1, config.rounds - 1) });
-                    if (sessionActive) {
-                      // Regenerate from NEXT round to preserve current round in progress
-                      const newSchedule = regenerateSchedule(players, { ...config, rounds: Math.max(1, config.rounds - 1) }, schedule, currentRound + 1);
-                      setSchedule(newSchedule);
-                    }
-                  }}
+                        onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
                         disabled={config.rounds === 1}
-                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-slate-200 hover:bg-slate-300 active:bg-slate-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-800 text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                        aria-label="Decrease number of rounds"
+                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-slate-200 hover:bg-slate-300 disabled:opacity-50 text-slate-800 text-xl font-bold touch-manipulation"
+                        aria-label="Decrease rounds"
                       >
                         −
                       </button>
-                      <div className="flex-1 min-w-0 rounded-xl bg-slate-100 px-4 py-3 text-center text-lg font-semibold text-slate-900 border border-slate-300">
+                      <div className="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-center text-lg font-semibold text-slate-900 border border-slate-300">
                         {config.rounds}
                       </div>
                       <button
                         type="button"
-                        onClick={() => {
-                    setConfig({ rounds: Math.min(99, config.rounds + 1) });
-                    if (sessionActive) {
-                      // Regenerate from NEXT round to preserve current round in progress
-                      const newSchedule = regenerateSchedule(players, { ...config, rounds: Math.min(99, config.rounds + 1) }, schedule, currentRound + 1);
-                      setSchedule(newSchedule);
-                    }
-                        }}
+                        onClick={() => setConfig({ rounds: Math.min(99, config.rounds + 1) })}
                         disabled={config.rounds === 99}
-                        className="flex-shrink-0 w-16 h-16 sm:w-14 sm:h-14 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-2xl font-bold flex items-center justify-center select-none touch-manipulation"
-                        aria-label="Increase number of rounds"
+                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xl font-bold touch-manipulation"
+                        aria-label="Increase rounds"
                       >
                         +
                       </button>
                     </div>
                   </div>
+                )}
 
-                  <div>
-                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Matching Algorithm</h3>
+                <div>
+                  <h3 className="text-xs font-semibold text-slate-600 mb-2">Matching Algorithm</h3>
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
@@ -622,9 +590,8 @@ export default function Home() {
                       </button>
                     </div>
                   </div>
-                </div>
+                </section>
               )}
-            </section>
 
             <section className="rounded-2xl bg-white border border-slate-200 p-4">
               <div className="flex items-center justify-between mb-3">
@@ -1338,51 +1305,54 @@ export default function Home() {
         {/* --- Leaderboard Screen --- */}
         {screen === "leaderboard" && (
           <div className="space-y-4">
-            <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white">
-              <table className="w-full text-left">
-                <thead>
-                  <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
-                    <th className="py-3 pl-4 font-semibold">#</th>
-                    <th className="py-3 font-semibold">Name</th>
-                    <th className="py-3 font-semibold text-center">Matches Played</th>
-                    <th className="py-3 font-semibold text-right pr-4">Pts</th>
-                    <th className="py-3 font-semibold text-center">W</th>
-                    <th className="py-3 font-semibold text-center">L</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {leaderboardSorted.map((p, i) => {
-                    const medal = i === 0 ? "🥇 " : i === 1 ? "🥈 " : i === 2 ? "🥉 " : "";
-                    return (
-                    <tr
-                      key={p.id}
-                      className={`border-t border-slate-200 ${i < 3 ? "bg-amber-50/60" : ""}`}
-                    >
-                      <td className="py-3 pl-4 font-bold text-slate-600 w-10">
-                        {i + 1}
-                      </td>
-                      <td className="py-3 font-medium text-slate-900">
-                        {medal}
-                        {p.name}
-                      </td>
-                      <td className="py-3 text-center text-slate-700">{p.gamesPlayed}</td>
-                      <td className="py-3 text-right pr-4 font-semibold text-emerald-600">
-                        {p.totalPoints}
-                      </td>
-                      <td className="py-3 text-center text-green-600">{p.wins}</td>
-                      <td className="py-3 text-center text-red-600">{p.losses}</td>
+            {!leaderboardSorted.some((p) => (p.gamesPlayed ?? 0) > 0) ? (
+              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
+                <p className="text-slate-600">No matches played yet. Start a session to see rankings.</p>
+              </div>
+            ) : (
+              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white">
+                <table className="w-full text-left table-fixed">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
+                      <th className="py-3 pl-4 font-semibold w-[40%]">Name</th>
+                      <th className="py-3 font-semibold text-center w-[20%]">Matches Played</th>
+                      <th className="py-3 font-semibold text-right pr-2 w-[15%]">PTS</th>
+                      <th className="py-3 font-semibold text-center w-[12%]">W</th>
+                      <th className="py-3 font-semibold text-center pr-4 w-[13%]">L</th>
                     </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            {leaderboardSorted.length === 0 && (
-              <p className="text-center text-slate-500 py-8">No players yet. Add players in Setup.</p>
+                  </thead>
+                  <tbody>
+                    {leaderboardSorted.map((p, i) => {
+                      const hasPlayed = (p.gamesPlayed ?? 0) >= 1;
+                      const medal =
+                        hasPlayed && i === 0 ? "🥇 " : hasPlayed && i === 1 ? "🥈 " : hasPlayed && i === 2 ? "🥉 " : "";
+                      return (
+                        <tr
+                          key={p.id}
+                          className={`border-t border-slate-200 ${hasPlayed && i < 3 ? "bg-amber-50/60" : ""}`}
+                        >
+                          <td className="py-3 pl-4 font-medium text-slate-900 truncate">
+                            {medal}
+                            {p.name}
+                          </td>
+                          <td className="py-3 text-center text-slate-700">{p.gamesPlayed ?? 0}</td>
+                          <td className="py-3 text-right pr-2 text-lg font-bold text-emerald-600">
+                            {p.totalPoints ?? 0}
+                          </td>
+                          <td className="py-3 text-center text-lg font-bold text-green-600">{p.wins ?? 0}</td>
+                          <td className="py-3 text-center pr-4 text-lg font-bold text-red-600">{p.losses ?? 0}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-            <p className="text-xs text-slate-500 text-center">
-              Sorted by total Americano points, then wins.
-            </p>
+            {leaderboardSorted.length > 0 && (
+              <p className="text-xs text-slate-500 text-center">
+                Sorted by total Americano points, then wins.
+              </p>
+            )}
           </div>
         )}
       </div>
