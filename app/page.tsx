@@ -2,9 +2,35 @@
 
 import { useState, useCallback, useMemo, useEffect } from "react";
 import { useStore, Player } from "../lib/store";
-import { generateSchedule, regenerateSchedule, getSkillLabel, getUniquePlayerName, generateRoundMatchups } from "../lib/scheduler";
+import { generateSchedule, regenerateSchedule, getUniquePlayerName, generateRoundMatchups, generateMatchId } from "../lib/scheduler";
 
 type Screen = "setup" | "session" | "leaderboard" | "schedule";
+
+const SKILL_OPTIONS: { value: 1 | 2 | 3 | 4 | 5; label: string }[] = [
+  { value: 1, label: "1 - Newbie" },
+  { value: 2, label: "2 - Beginner" },
+  { value: 3, label: "3 - Intermediate" },
+  { value: 4, label: "4 - Advanced" },
+  { value: 5, label: "5 - Pro" },
+];
+
+// Teal gradient for skill: 1=lightest, 5=darkest. Deep blue text on 1–2, white on 3–5.
+const SKILL_HEX: Record<1 | 2 | 3 | 4 | 5, string> = {
+  1: "#D0ECE7",
+  2: "#A8DDD2",
+  3: "#2DBDA8",
+  4: "#238F7E",
+  5: "#2B6B8A",
+};
+
+function skillPillStyle(skill: 1 | 2 | 3 | 4 | 5): { bg: string; textClass: string } {
+  const deepBlueText = "text-[#2B6B8A]";
+  const whiteText = "text-white";
+  return {
+    bg: SKILL_HEX[skill],
+    textClass: skill >= 3 ? whiteText : deepBlueText,
+  };
+}
 
 /** Shared header: logo + tab bar. Same on every tab; only the active pill changes. */
 function AppHeader({
@@ -21,18 +47,18 @@ function AppHeader({
     { id: "leaderboard", label: "Leaderboard" },
   ];
   return (
-    <header className="sticky top-0 z-30 bg-gray-50 border-b border-slate-200/80 pb-4 sm:pb-6">
-      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-emerald-600 mb-4 sm:mb-6 pt-4 sm:pt-6">
+    <header className="sticky top-0 z-30 bg-[#F8F3E6] border-b border-[#E2E8F0] pb-4 sm:pb-6">
+      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#2B6B8A] mb-4 sm:mb-6 pt-4 sm:pt-6">
         gaspadel
       </h1>
-      <nav className="flex gap-1 rounded-xl bg-slate-200/80 p-1 overflow-x-auto">
+      <nav className="flex gap-1 rounded-xl bg-[#E2E8F0]/80 p-1 overflow-x-auto">
         {tabs.map(({ id, label }) => (
           <button
             key={id}
             type="button"
             onClick={() => setScreen(id)}
             className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${
-              screen === id ? "bg-emerald-600 text-white" : "text-slate-600 hover:text-slate-900"
+              screen === id ? "bg-[#2DBDA8] text-white" : "text-[#2B6B8A] hover:opacity-80"
             }`}
           >
             {label}
@@ -82,9 +108,8 @@ export default function Home() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [regularsSelected, setRegularsSelected] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
-  const [sessionDuration, setSessionDuration] = useState<number>(90);
-  const [durationOptions, setDurationOptions] = useState<number[]>([30, 60, 90, 120]);
-  const [showAdvancedOverrides, setShowAdvancedOverrides] = useState<boolean>(false);
+  const [sessionDuration, setSessionDuration] = useState<number>(60);
+  const [durationOptions, setDurationOptions] = useState<number[]>([60, 120, 180]);
 
   const addToast = useCallback((message: string) => {
     const id = Math.random().toString(36).slice(2, 9);
@@ -112,6 +137,19 @@ export default function Home() {
   const currentRoundMatches = useMemo(() => {
     return currentRoundData?.matches || [];
   }, [currentRoundData]);
+
+  // Courts that have a match in the current round (for switcher pills only)
+  const courtsWithMatchInCurrentRound = useMemo(() => {
+    return [...new Set((currentRoundData?.matches ?? []).map((m) => m.court))].sort((a, b) => a - b);
+  }, [currentRoundData]);
+
+  // Keep selectedCourt valid when schedule changes (e.g. add/remove court)
+  useEffect(() => {
+    if (!sessionActive || courtsWithMatchInCurrentRound.length === 0) return;
+    if (!courtsWithMatchInCurrentRound.includes(selectedCourt)) {
+      setSelectedCourt(courtsWithMatchInCurrentRound[0]);
+    }
+  }, [sessionActive, courtsWithMatchInCurrentRound, selectedCourt]);
 
   const addPlayer = useCallback(() => {
     const name = newName.trim();
@@ -290,37 +328,64 @@ export default function Home() {
     return currentRoundData?.sittingOut || [];
   }, [currentRoundData]);
 
-  // Auto-calculation: ~8 min/match at 21pts, ~5 min at 16pts, ~12 min at 32pts
-  const minPerMatchForPoints = useCallback((pts: number) => {
-    if (pts <= 16) return 5;
-    if (pts <= 21) return 8;
-    return 12;
-  }, []);
+  // Match duration in minutes: 8 (Short/16pts), 10 (Standard/21pts), 13 (Long/32pts) — for time-based round count
+  const matchDurationMinutes = useMemo(() => {
+    if (config.pointsPerMatch <= 16) return 8;
+    if (config.pointsPerMatch <= 21) return 10;
+    return 13;
+  }, [config.pointsPerMatch]);
 
-  const autoRounds = useMemo(
-    () =>
-      Math.max(
-        1,
-        Math.min(
-          99,
-          Math.round(sessionDuration / minPerMatchForPoints(config.pointsPerMatch))
-        )
-      ),
-    [sessionDuration, config.pointsPerMatch]
-  );
-  const effectiveRounds = showAdvancedOverrides ? config.rounds : autoRounds;
+  function gcd(a: number, b: number): number {
+    a = Math.abs(a);
+    b = Math.abs(b);
+    return b ? gcd(b, a % b) : a;
+  }
+
+  // Two constraints: (1) fill session duration, (2) equal matches per player (rounds so sit-outs distribute evenly)
+  const balancedRoundParams = useMemo(() => {
+    const N = Math.max(4, activePlayers.length);
+    const C = config.courts;
+    const timeBasedRounds = Math.round(sessionDuration / matchDurationMinutes);
+    const step = N / gcd(4 * C, N) || 1;
+    const balancedRounds = Math.max(
+      1,
+      Math.min(99, Math.ceil(Math.max(1, timeBasedRounds) / step) * step)
+    );
+    const matchesPerPlayer = N > 0 ? Math.floor((4 * balancedRounds * C) / N) : 0;
+    return { balancedRounds, step, matchesPerPlayer };
+  }, [activePlayers.length, config.courts, sessionDuration, matchDurationMinutes]);
+
   const effectivePoints = config.pointsPerMatch;
-  const effectiveMinPerMatch = minPerMatchForPoints(effectivePoints);
-  const avgGamesPerPlayer =
-    activePlayers.length > 0
-      ? Math.round((effectiveRounds * config.courts * 4) / activePlayers.length)
-      : 0;
 
-  // Sync auto rounds to config when duration or match length changes and not in Advanced (recalculates live)
-  useEffect(() => {
-    if (sessionActive || showAdvancedOverrides) return;
-    setConfig({ rounds: autoRounds });
-  }, [sessionDuration, config.pointsPerMatch, showAdvancedOverrides, sessionActive, autoRounds, setConfig]);
+  // When session is active: offer adding X rounds so everyone plays Y more matches equally (X = balanced step). Shown even before all rounds complete.
+  const timeLeftRecommendation = useMemo(() => {
+    if (!sessionActive || activePlayers.length < 4) return null;
+    const N = activePlayers.length;
+    const C = config.courts;
+    const step = balancedRoundParams.step;
+    const extraMatchesPerPlayer = Math.floor((4 * step * C) / N);
+    if (extraMatchesPerPlayer < 1) return null;
+    return {
+      addRounds: step,
+      extraMatchesPerPlayer,
+    };
+  }, [sessionActive, activePlayers.length, config.courts, balancedRoundParams.step]);
+
+  const hasTimeLeftRecommendation = timeLeftRecommendation !== null;
+
+  // Set rounds and regenerate schedule from next round when session active and increasing
+  const setRoundsWithSchedule = useCallback(
+    (newRounds: number) => {
+      const prevRounds = config.rounds;
+      setConfig({ rounds: newRounds });
+      if (sessionActive && newRounds > prevRounds) {
+        const updatedPlayers = useStore.getState().players;
+        const newSchedule = regenerateSchedule(updatedPlayers, { ...config, rounds: newRounds }, schedule, currentRound + 1);
+        setSchedule(newSchedule);
+      }
+    },
+    [config, schedule, currentRound, sessionActive, setConfig, setSchedule]
+  );
 
   // Get player status for display
   const getPlayerStatus = useCallback((player: Player): "Playing" | "Waiting" | "Paused" | "Joining next round" | "Sitting out" => {
@@ -360,8 +425,8 @@ export default function Home() {
 
 
   return (
-    <div className="min-h-screen font-sans bg-gray-50 text-gray-900">
-      <div className="mx-auto max-w-lg px-3 sm:px-4 pb-20 sm:pb-24 safe-area-pb">
+    <div className="min-h-screen font-sans bg-[#F8F3E6] text-[#2B6B8A]">
+      <div className="mx-auto max-w-lg min-w-0 w-full px-3 sm:px-4 pb-20 sm:pb-24 safe-area-pb box-border">
         <AppHeader screen={screen} setScreen={setScreen} />
 
         {/* --- Setup Screen --- */}
@@ -369,18 +434,18 @@ export default function Home() {
           <div className="space-y-6">
             {/* Session Status Banner */}
             {sessionActive && (
-              <div className="rounded-2xl bg-emerald-50 border border-emerald-300 p-4">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-emerald-800">Session Active</p>
-                    <p className="text-xs text-emerald-700 mt-1">
+                    <p className="text-sm font-semibold text-[#2B6B8A]">Session Active</p>
+                    <p className="text-xs text-[#2B6B8A]/80 mt-1">
                       Round {currentRound} of {config.rounds}
                     </p>
                   </div>
                   <button
                     type="button"
                     onClick={endSession}
-                    className="px-4 py-2 rounded-lg bg-red-50 border border-red-300 text-red-700 text-sm font-medium hover:bg-red-100 touch-manipulation"
+                    className="px-4 py-2 rounded-lg bg-[#C0444E]/10 border border-[#C0444E]/40 text-[#C0444E] text-sm font-medium hover:bg-[#C0444E]/20 touch-manipulation"
                   >
                     End Session
                   </button>
@@ -388,142 +453,185 @@ export default function Home() {
               </div>
             )}
 
-            {/* Config: 3 inputs (Courts, Duration, Match length) + summary + Advanced */}
-            {!sessionActive && (
-              <section className="rounded-2xl bg-white border border-slate-200 p-4 space-y-4">
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-800 mb-2">Courts</h2>
-                  <div className="flex gap-2">
-                    {([1, 2, 3, 4] as const).map((n) => (
-                      <button
-                        key={n}
-                        type="button"
-                        onClick={() => setConfig({ courts: n })}
-                        className={`flex-1 rounded-xl py-3 text-sm font-semibold transition touch-manipulation ${
-                          config.courts === n
-                            ? "bg-emerald-600 text-white"
-                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                        }`}
-                      >
-                        {n}
-                      </button>
-                    ))}
-                  </div>
+            {/* Courts: always editable on Setup, including mid-session */}
+            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
+              <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Courts</h2>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newCourts = Math.max(1, config.courts - 1);
+                    setConfig({ courts: newCourts });
+                    if (sessionActive) {
+                      const updatedPlayers = useStore.getState().players;
+                      const newSchedule = regenerateSchedule(
+                        updatedPlayers,
+                        { ...config, courts: newCourts },
+                        schedule,
+                        currentRound + 1
+                      );
+                      setSchedule(newSchedule);
+                    }
+                  }}
+                  disabled={config.courts === 1}
+                  className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#E2E8F0] hover:bg-[#E2E8F0]/80 disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#2B6B8A] text-xl font-bold touch-manipulation"
+                  aria-label="Decrease courts"
+                >
+                  −
+                </button>
+                <div className="flex-1 min-w-0 rounded-xl bg-[#E2E8F0]/30 px-4 py-3 text-center text-lg font-semibold text-[#2B6B8A] border border-[#E2E8F0]">
+                  {config.courts} court{config.courts !== 1 ? "s" : ""}
                 </div>
-
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-800 mb-2">Duration</h2>
-                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
-                    {durationOptions.map((mins) => (
-                      <button
-                        key={mins}
-                        type="button"
-                        onClick={() => setSessionDuration(mins)}
-                        className={`shrink-0 rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
-                          sessionDuration === mins
-                            ? "bg-emerald-600 text-white"
-                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                        }`}
-                      >
-                        {mins} min
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = durationOptions[durationOptions.length - 1] + 30;
-                        setDurationOptions((prev) => [...prev, next]);
-                        setSessionDuration(next);
-                      }}
-                      className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition touch-manipulation"
-                      aria-label="Add 30 minutes"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <h2 className="text-sm font-semibold text-slate-800 mb-2">Match length</h2>
-                  <div className="flex gap-2 flex-wrap">
-                    {[
-                      { label: "Short (16pts)", pts: 16 },
-                      { label: "Standard (21pts)", pts: 21 },
-                      { label: "Long (32pts)", pts: 32 },
-                    ].map(({ label, pts }) => (
-                      <button
-                        key={pts}
-                        type="button"
-                        onClick={() => setConfig({ pointsPerMatch: pts })}
-                        className={`rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
-                          config.pointsPerMatch === pts
-                            ? "bg-emerald-600 text-white"
-                            : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <p className="text-sm text-slate-700 font-medium">
-                  ~{effectiveRounds} rounds, ~{effectiveMinPerMatch} min per match, everyone plays ~{avgGamesPerPlayer} games
+                <button
+                  type="button"
+                  onClick={() => {
+                    const newCourts = Math.min(4, config.courts + 1);
+                    setConfig({ courts: newCourts });
+                    if (sessionActive) {
+                      const updatedPlayers = useStore.getState().players;
+                      const currentRoundData = schedule.find((r) => r.roundNumber === currentRound);
+                      let scheduleToRegenerate = schedule;
+                      // If we have 4+ sitting out, add a match on the new court for the current round
+                      if (currentRoundData && currentRoundData.sittingOut.length >= 4) {
+                        const sittingOut = [...currentRoundData.sittingOut];
+                        const shuffled = sittingOut.sort(() => Math.random() - 0.5);
+                        const four = shuffled.slice(0, 4);
+                        const fourSet = new Set(four);
+                        const newMatch = {
+                          id: generateMatchId(),
+                          court: newCourts,
+                          teamA: { playerIds: [four[0], four[1]] },
+                          teamB: { playerIds: [four[2], four[3]] },
+                          status: "upcoming" as const,
+                        };
+                        const updatedRound = {
+                          ...currentRoundData,
+                          matches: [...currentRoundData.matches, newMatch],
+                          sittingOut: sittingOut.filter((id) => !fourSet.has(id)),
+                        };
+                        scheduleToRegenerate = schedule.map((r) =>
+                          r.roundNumber === currentRound ? updatedRound : r
+                        );
+                      }
+                      const newSchedule = regenerateSchedule(
+                        updatedPlayers,
+                        { ...config, courts: newCourts },
+                        scheduleToRegenerate,
+                        currentRound + 1
+                      );
+                      setSchedule(newSchedule);
+                    }
+                  }}
+                  disabled={config.courts === 4}
+                  className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold touch-manipulation"
+                  aria-label="Increase courts"
+                >
+                  +
+                </button>
+              </div>
+              {sessionActive && (
+                <p className="text-xs text-[#2B6B8A]/70 mt-2">
+                  Current round updated if 4+ sitting out; future rounds use {config.courts} court{config.courts !== 1 ? "s" : ""}.
                 </p>
+              )}
+            </section>
 
-                <div className="flex items-center justify-between pt-1">
-                  <span className="text-sm text-slate-600">Advanced</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAdvancedOverrides((v) => !v);
-                      if (!showAdvancedOverrides) return;
-                      setConfig({ rounds: autoRounds });
-                    }}
-                    className={`relative rounded-full w-11 h-6 transition-colors touch-manipulation ${
-                      showAdvancedOverrides ? "bg-emerald-600" : "bg-slate-200"
-                    }`}
-                    aria-label="Toggle advanced overrides"
-                  >
-                    <span
-                      className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-transform ${
-                        showAdvancedOverrides ? "left-6" : "left-1"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                {showAdvancedOverrides && (
-                  <div className="pt-2 border-t border-slate-200">
-                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Number of rounds</h3>
-                    <div className="flex items-center gap-2">
+            {/* When no session: 3 hero inputs (Courts above) + Duration + Match length, then small rounds line */}
+            {!sessionActive && (
+              <>
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4">
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Duration</h2>
+                    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
+                      {durationOptions.map((mins) => (
+                        <button
+                          key={mins}
+                          type="button"
+                          onClick={() => setSessionDuration(mins)}
+                          className={`shrink-0 rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                            sessionDuration === mins
+                              ? "bg-[#2DBDA8] text-white"
+                              : "bg-[#E2E8F0]/50 text-[#2B6B8A] hover:bg-[#E2E8F0]"
+                          }`}
+                        >
+                          {mins} min
+                        </button>
+                      ))}
                       <button
                         type="button"
-                        onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
-                        disabled={config.rounds === 1}
-                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-slate-200 hover:bg-slate-300 disabled:opacity-50 text-slate-800 text-xl font-bold touch-manipulation"
-                        aria-label="Decrease rounds"
-                      >
-                        −
-                      </button>
-                      <div className="flex-1 rounded-xl bg-slate-100 px-4 py-2.5 text-center text-lg font-semibold text-slate-900 border border-slate-300">
-                        {config.rounds}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setConfig({ rounds: Math.min(99, config.rounds + 1) })}
-                        disabled={config.rounds === 99}
-                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xl font-bold touch-manipulation"
-                        aria-label="Increase rounds"
+                        onClick={() => {
+                          const next = durationOptions[durationOptions.length - 1] + 60;
+                          setDurationOptions((prev) => [...prev, next]);
+                          setSessionDuration(next);
+                        }}
+                        className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-[#E2E8F0]/50 text-[#2B6B8A] hover:bg-[#E2E8F0] transition touch-manipulation"
+                        aria-label="Add 60 minutes"
                       >
                         +
                       </button>
                     </div>
                   </div>
-                )}
 
+                  <div>
+                    <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Match length</h2>
+                    <div className="flex gap-2 flex-wrap">
+                      {[16, 21, 32].map((pts) => (
+                        <button
+                          key={pts}
+                          type="button"
+                          onClick={() => setConfig({ pointsPerMatch: pts })}
+                          className={`rounded-full px-4 py-2.5 text-sm font-medium transition touch-manipulation ${
+                            config.pointsPerMatch === pts
+                              ? "bg-[#2DBDA8] text-white"
+                              : "bg-[#E2E8F0]/50 text-[#2B6B8A] hover:bg-[#E2E8F0]"
+                          }`}
+                        >
+                          {pts} pts
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                {/* Rounds: header, stepper (same width as Courts), summary on own line */}
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3">
+                  <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Rounds</h2>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
+                      disabled={config.rounds === 1}
+                      className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#E2E8F0] hover:bg-[#E2E8F0]/80 disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#2B6B8A] text-xl font-bold touch-manipulation"
+                      aria-label="Decrease rounds"
+                    >
+                      −
+                    </button>
+                    <div className="flex-1 min-w-0 rounded-xl bg-[#E2E8F0]/30 px-4 py-2.5 text-center text-lg font-semibold text-[#2B6B8A] border border-[#E2E8F0]">
+                      {config.rounds}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ rounds: config.rounds + 1 })}
+                      className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
+                      aria-label="Increase rounds"
+                    >
+                      +
+                    </button>
+                  </div>
+                  {activePlayers.length >= 4 && (
+                    <button
+                      type="button"
+                      onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
+                      className="text-sm text-[#2DBDA8] hover:text-[#238F7E] hover:underline text-center w-full touch-manipulation"
+                    >
+                      Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
+                    </button>
+                  )}
+                </section>
+
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4">
                 <div>
-                  <h3 className="text-xs font-semibold text-slate-600 mb-2">Matching Algorithm</h3>
+                  <h3 className="text-xs font-semibold text-[#2B6B8A] mb-2">Matching Algorithm</h3>
                     <div className="flex flex-col gap-2">
                       <button
                         type="button"
@@ -537,12 +645,12 @@ export default function Home() {
                         }}
                         className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
                           config.algorithm === "balanced"
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                            : "border-slate-300 bg-slate-100 text-slate-800"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#2B6B8A]"
+                            : "border-[#E2E8F0] bg-[#E2E8F0]/50 text-[#2B6B8A]"
                         }`}
                       >
                         <div className="font-semibold">Balanced</div>
-                        <p className="text-xs text-slate-600">
+                        <p className="text-xs text-[#2B6B8A]/80">
                           Balance skill levels across teams for fair matchups.
                         </p>
                       </button>
@@ -558,12 +666,12 @@ export default function Home() {
                         }}
                         className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
                           config.algorithm === "random"
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                            : "border-slate-300 bg-slate-100 text-slate-800"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#2B6B8A]"
+                            : "border-[#E2E8F0] bg-[#E2E8F0]/50 text-[#2B6B8A]"
                         }`}
                       >
                         <div className="font-semibold">Random</div>
-                        <p className="text-xs text-slate-600">
+                        <p className="text-xs text-[#2B6B8A]/80">
                           Fully randomized matchups, ignoring skill ratings.
                         </p>
                       </button>
@@ -579,31 +687,80 @@ export default function Home() {
                         }}
                         className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
                           config.algorithm === "king"
-                            ? "border-emerald-500 bg-emerald-50 text-emerald-800"
-                            : "border-slate-300 bg-slate-100 text-slate-800"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#2B6B8A]"
+                            : "border-[#E2E8F0] bg-[#E2E8F0]/50 text-[#2B6B8A]"
                         }`}
                       >
                         <div className="font-semibold">King of the Court</div>
-                        <p className="text-xs text-slate-600">
+                        <p className="text-xs text-[#2B6B8A]/80">
                           Winning team stays on court; losing team rotates off.
                         </p>
                       </button>
                     </div>
                   </div>
                 </section>
+              </>
               )}
 
-            <section className="rounded-2xl bg-white border border-slate-200 p-4">
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-slate-800">Players</h2>
+            {/* When session active: Courts (above) + prominent Rounds + Players only */}
+            {sessionActive && (
+              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3">
+                <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Rounds</h2>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-semibold ${activePlayers.length >= config.courts * 4 ? "text-emerald-600" : "text-slate-600"}`}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newRounds = Math.max(currentRound, config.rounds - 1);
+                      setConfig({ rounds: newRounds });
+                    }}
+                    disabled={config.rounds <= currentRound}
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#E2E8F0] hover:bg-[#E2E8F0]/80 disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#2B6B8A] text-xl font-bold touch-manipulation"
+                    aria-label="Decrease rounds"
+                  >
+                    −
+                  </button>
+                  <div className="flex-1 min-w-0 rounded-xl bg-[#E2E8F0]/30 px-4 py-2.5 text-center text-lg font-semibold text-[#2B6B8A] border border-[#E2E8F0]">
+                    {config.rounds}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRoundsWithSchedule(config.rounds + 1)}
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
+                    aria-label="Increase rounds"
+                  >
+                    +
+                  </button>
+                </div>
+                <p className="text-xs text-[#2B6B8A]/70 text-center">
+                  {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining
+                </p>
+                {activePlayers.length >= 4 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const recommended = balancedRoundParams.balancedRounds;
+                      const newRounds = Math.max(currentRound, recommended);
+                      setRoundsWithSchedule(newRounds);
+                    }}
+                    className="text-sm text-[#2DBDA8] hover:text-[#238F7E] hover:underline text-center w-full touch-manipulation"
+                  >
+                    Recommended: {balancedRoundParams.balancedRounds} (balanced play)
+                  </button>
+                )}
+              </section>
+            )}
+
+            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-[#2B6B8A]">Players</h2>
+                <div className="flex items-center gap-2">
+                  <span className={`text-sm font-semibold ${activePlayers.length >= config.courts * 4 ? "text-[#2DBDA8]" : "text-[#2B6B8A]/80"}`}>
                     {activePlayers.length}
                   </span>
-                  <span className="text-xs text-slate-500">/ {config.courts * 4} min</span>
+                  <span className="text-xs text-[#2B6B8A]/70">/ {config.courts * 4} min</span>
                 </div>
               </div>
-              <p className="text-xs text-slate-600 mb-3">
+              <p className="text-xs text-[#2B6B8A]/80 mb-3">
                 Need at least {config.courts * 4} to start ({config.courts} court{config.courts > 1 ? "s" : ""}). You can add more during the session.
               </p>
 
@@ -613,13 +770,13 @@ export default function Home() {
                 const regularsNotInRoster = savedRoster.filter((sp) => !currentIds.has(sp.id));
                 if (regularsNotInRoster.length === 0) return null;
                 return (
-                  <div className="mb-4 rounded-xl bg-slate-100 border border-slate-200 p-3">
-                    <h3 className="text-xs font-semibold text-slate-600 mb-2">Your regulars</h3>
+                  <div className="mb-4 rounded-xl bg-[#E2E8F0]/30 border border-[#E2E8F0] p-3">
+                    <h3 className="text-xs font-semibold text-[#2B6B8A] mb-2">Your regulars</h3>
                     <div className="flex flex-wrap gap-2">
                       {regularsNotInRoster.map((sp) => (
                         <label
                           key={sp.id}
-                          className="flex items-center gap-2 rounded-lg bg-white border border-slate-200 px-3 py-2 cursor-pointer touch-manipulation min-h-[44px]"
+                          className="flex items-center gap-2 rounded-lg bg-white border border-[#E2E8F0] px-3 py-2 cursor-pointer touch-manipulation min-h-[44px]"
                         >
                           <input
                             type="checkbox"
@@ -632,11 +789,16 @@ export default function Home() {
                                 return next;
                               });
                             }}
-                            className="rounded border-slate-400 text-emerald-600 focus:ring-emerald-500"
+                            className="rounded border-[#E2E8F0] text-[#2DBDA8] focus:ring-[#2DBDA8]"
                           />
-                          <span className="text-sm text-slate-800">{sp.name}</span>
+                          <span className="text-sm text-[#2B6B8A]">{sp.name}</span>
                           {config.algorithm === "balanced" && (
-                            <span className="text-[10px] text-emerald-600">{getSkillLabel(sp.skill)}</span>
+                            <span
+                              className={`rounded-full px-1.5 h-5 flex items-center justify-center text-[10px] font-bold shrink-0 ${skillPillStyle(sp.skill).textClass}`}
+                              style={{ backgroundColor: SKILL_HEX[sp.skill] }}
+                            >
+                              {sp.skill}
+                            </span>
                           )}
                         </label>
                       ))}
@@ -645,7 +807,7 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={handleAddSelectedRegulars}
-                        className="mt-2 w-full rounded-lg bg-emerald-600/80 py-2 text-sm font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[40px]"
+                        className="mt-2 w-full rounded-lg bg-[#2DBDA8] py-2 text-sm font-medium text-white hover:bg-[#238F7E] touch-manipulation min-h-[40px]"
                       >
                         Add selected ({regularsSelected.size})
                       </button>
@@ -655,44 +817,57 @@ export default function Home() {
               })()}
 
               {/* Add player */}
-              <div className="flex gap-2 mb-4">
+              <div className="flex flex-wrap items-center gap-2 mb-4">
                 <input
                   type="text"
                   placeholder="Name"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addPlayer()}
-                  className="flex-1 rounded-xl bg-white px-4 py-2.5 text-slate-900 placeholder-slate-500 border border-slate-300 focus:border-emerald-500 outline-none"
+                  className="flex-1 min-w-0 rounded-xl bg-white px-4 py-2.5 text-[#2B6B8A] placeholder-[#B0BEC5] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                 />
+                {config.algorithm === "balanced" && (
+                  <div className="relative inline-flex shrink-0">
+                    <span
+                      className={`rounded-full pl-2.5 pr-1.5 h-7 flex items-center gap-0.5 text-sm font-bold ${skillPillStyle(newSkill).textClass}`}
+                      style={{ backgroundColor: SKILL_HEX[newSkill] }}
+                      aria-hidden
+                    >
+                      {newSkill} ▾
+                    </span>
+                    <select
+                      value={newSkill}
+                      onChange={(e) => setNewSkill(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
+                      className="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-manipulation"
+                      aria-label="Skill level"
+                    >
+                      {SKILL_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>{o.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={addPlayer}
-                  className="rounded-xl bg-emerald-600 px-4 py-2.5 font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[44px]"
+                  className="rounded-xl bg-[#2DBDA8] px-4 py-2.5 font-medium text-white hover:bg-[#238F7E] touch-manipulation min-h-[44px] shrink-0"
                 >
                   Add
                 </button>
               </div>
 
               {/* Player roster */}
-              <ul className="space-y-2">
+              <ul className="space-y-1">
                 {players.filter((p) => p.status !== "removed").map((p) => {
                   const isEditing = editingPlayerId === p.id;
                   const isPaused = p.status === "paused";
                   const showDeleteConfirm = deleteConfirmId === p.id;
-                  const status = getPlayerStatus(p);
-                  const statusColors: Record<string, string> = {
-                    Playing: "bg-emerald-500/20 text-emerald-300 border-emerald-500/50",
-                    Waiting: "bg-blue-500/20 text-blue-300 border-blue-500/50",
-                    Paused: "bg-orange-500/20 text-orange-300 border-orange-500/50",
-                    "Joining next round": "bg-amber-500/20 text-amber-300 border-amber-500/50",
-                    "Sitting out": "bg-slate-200 text-slate-700 border-slate-300",
-                  };
                   return (
                     <li
                       key={p.id}
-                      className={`flex flex-col gap-2 rounded-xl px-4 py-3 transition-all border ${
-                        isPaused ? "bg-slate-100 opacity-75 border-slate-200" : "bg-slate-50 border-slate-200"
-                      } ${isEditing ? "ring-2 ring-emerald-500 bg-white" : ""}`}
+                      className={`flex flex-col rounded-lg border transition-all min-h-[44px] ${
+                        isPaused ? "bg-[#E2E8F0]/40 opacity-80 border-[#E2E8F0]" : "bg-white border-[#E2E8F0]"
+                      } ${isEditing ? "ring-2 ring-[#2DBDA8] bg-white p-2" : "px-3 py-2"}`}
                     >
                       {isEditing ? (
                         <div className="flex flex-col gap-2">
@@ -704,139 +879,134 @@ export default function Home() {
                               if (e.key === "Enter") saveEditedPlayer();
                               if (e.key === "Escape") cancelEditingPlayer();
                             }}
-                            className="w-full rounded-lg bg-white px-3 py-2 text-slate-900 border border-slate-300 focus:border-emerald-500 outline-none"
+                            className="w-full rounded-lg bg-white px-3 py-2 text-[#2B6B8A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                             autoFocus
                           />
                           {config.algorithm === "balanced" && (
                             <select
                               value={editingPlayerSkill}
                               onChange={(e) => setEditingPlayerSkill(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
-                              className="w-full rounded-lg bg-white px-3 py-2 text-slate-900 border border-slate-300 focus:border-emerald-500 outline-none"
+                              className="w-full rounded-lg bg-white px-3 py-2 text-[#2B6B8A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                             >
-                              <option value={1}>1 - Newbie</option>
-                              <option value={2}>2 - Beginner</option>
-                              <option value={3}>3 - Intermediate</option>
-                              <option value={4}>4 - Advanced</option>
-                              <option value={5}>5 - Pro</option>
+                              {SKILL_OPTIONS.map((o) => (
+                                <option key={o.value} value={o.value}>{o.label}</option>
+                              ))}
                             </select>
                           )}
                           <div className="flex gap-2">
                             <button
                               type="button"
                               onClick={saveEditedPlayer}
-                              className="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-500 touch-manipulation"
+                              className="flex-1 rounded-lg bg-[#2DBDA8] px-3 py-2 text-sm font-medium text-white hover:bg-[#238F7E] touch-manipulation"
                             >
                               Save
                             </button>
                             <button
                               type="button"
                               onClick={cancelEditingPlayer}
-                              className="flex-1 rounded-lg bg-slate-200 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-300 touch-manipulation"
+                              className="flex-1 rounded-lg bg-[#E2E8F0] px-3 py-2 text-sm font-medium text-[#2B6B8A] hover:bg-[#E2E8F0]/80 touch-manipulation"
                             >
                               Cancel
                             </button>
                           </div>
                         </div>
                       ) : (
-                        <>
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex-1 min-w-0 flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => startEditingPlayer(p)}
-                                className={`text-left font-medium hover:text-emerald-600 transition-colors truncate ${isPaused ? "text-slate-500" : "text-slate-900"}`}
-                              >
-                                {p.name}
-                              </button>
-                              <span className={`shrink-0 inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium ${statusColors[status] || statusColors.Waiting}`}>
-                                {status}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              {config.algorithm === "balanced" && !isPaused && (
+                        <div className="flex items-center justify-between gap-3 min-h-[36px]">
+                          <div className="min-w-0 flex-1">
+                            <button
+                              type="button"
+                              onClick={() => startEditingPlayer(p)}
+                              className={`text-left text-sm font-medium hover:text-[#2DBDA8] transition-colors break-words w-full ${isPaused ? "text-[#B0BEC5]" : "text-[#2B6B8A]"}`}
+                            >
+                              {p.name}
+                            </button>
+                            {isPaused && (
+                              <span className="text-xs text-[#2B6B8A]/70 block mt-0.5">Paused</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {config.algorithm === "balanced" && (
+                              <div className="relative inline-flex shrink-0" onClick={(e) => e.stopPropagation()}>
+                                <span
+                                  className={`rounded-full pl-2 pr-1 h-6 flex items-center gap-0.5 text-xs font-bold ${skillPillStyle(p.skill).textClass}`}
+                                  style={{ backgroundColor: SKILL_HEX[p.skill] }}
+                                  aria-hidden
+                                >
+                                  {p.skill} ▾
+                                </span>
                                 <select
                                   value={p.skill}
                                   onChange={(e) => {
                                     const newSkill = Number(e.target.value) as 1 | 2 | 3 | 4 | 5;
                                     updatePlayerSkill(p.id, newSkill);
                                   }}
-                                  className="rounded-lg bg-white border border-slate-300 px-2 py-1 text-xs text-slate-800 focus:border-emerald-500 focus:outline-none touch-manipulation min-h-[32px]"
                                   onClick={(e) => e.stopPropagation()}
+                                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer touch-manipulation"
+                                  aria-label={`Skill level for ${p.name}`}
                                 >
-                                  <option value={1}>1 - Newbie</option>
-                                  <option value={2}>2 - Beginner</option>
-                                  <option value={3}>3 - Intermediate</option>
-                                  <option value={4}>4 - Advanced</option>
-                                  <option value={5}>5 - Pro</option>
+                                  {SKILL_OPTIONS.map((o) => (
+                                    <option key={o.value} value={o.value}>{o.label}</option>
+                                  ))}
                                 </select>
-                              )}
-                              {isPaused ? (
+                              </div>
+                            )}
+                            {isPaused ? (
+                              <button
+                                type="button"
+                                onClick={() => handleResumePlayer(p.id)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#2DBDA8] text-white hover:bg-[#238F7E] touch-manipulation"
+                                aria-label={`Resume ${p.name}`}
+                              >
+                                <span className="text-sm leading-none" aria-hidden>▶</span>
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handlePausePlayer(p.id)}
+                                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E2E8F0] text-[#2B6B8A] hover:bg-[#E2E8F0]/80 touch-manipulation"
+                                aria-label={`Pause ${p.name}`}
+                              >
+                                <span className="text-sm leading-none" aria-hidden>⏸</span>
+                              </button>
+                            )}
+                            {showDeleteConfirm ? (
+                              <>
                                 <button
                                   type="button"
-                                  onClick={() => handleResumePlayer(p.id)}
-                                  className="rounded-lg bg-emerald-600/80 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-500 touch-manipulation min-h-[36px]"
-                                  aria-label={`Resume ${p.name}`}
+                                  onClick={() => handleRemovePlayer(p.id)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#C0444E] text-white hover:bg-[#C0444E]/90 touch-manipulation"
+                                  aria-label={`Confirm remove ${p.name}`}
                                 >
-                                  Resume
+                                  ✓
                                 </button>
-                              ) : (
                                 <button
                                   type="button"
-                                  onClick={() => handlePausePlayer(p.id)}
-                                  className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300 touch-manipulation"
-                                  aria-label={`Pause ${p.name}`}
+                                  onClick={() => setDeleteConfirmId(null)}
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E2E8F0] text-[#2B6B8A] hover:bg-[#E2E8F0]/80 touch-manipulation"
+                                  aria-label="Cancel"
                                 >
-                                  <span className="text-lg leading-none" aria-hidden>⏸</span>
+                                  ✕
                                 </button>
-                              )}
-                              {showDeleteConfirm ? (
-                                <div className="flex items-center gap-1">
-                                  <span className="text-[10px] text-slate-600 whitespace-nowrap">Remove?</span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleRemovePlayer(p.id)}
-                                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-red-600 text-white hover:bg-red-500 touch-manipulation"
-                                    aria-label={`Confirm remove ${p.name}`}
-                                  >
-                                    ✓
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setDeleteConfirmId(null)}
-                                    className="flex h-9 w-9 items-center justify-center rounded-lg bg-slate-200 text-slate-800 hover:bg-slate-300 touch-manipulation"
-                                    aria-label="Cancel"
-                                  >
-                                    ✕
-                                  </button>
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => setDeleteConfirmId(p.id)}
-                                  className="flex h-9 w-9 items-center justify-center rounded-full bg-red-500/10 text-red-400 hover:bg-red-500/20 text-sm font-semibold touch-manipulation"
-                                  aria-label={`Delete ${p.name} (keeps scores)`}
-                                >
-                                  ×
-                                </button>
-                              )}
-                            </div>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setDeleteConfirmId(p.id)}
+                                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#C0444E]/10 text-[#C0444E] hover:bg-[#C0444E]/20 text-sm font-semibold touch-manipulation"
+                                aria-label={`Remove ${p.name}`}
+                              >
+                                ×
+                              </button>
+                            )}
                           </div>
-                          {sessionActive && (
-                            <div className="flex items-center gap-4 text-xs text-slate-500 pt-1 border-t border-slate-600/50">
-                              <span>GP: {p.gamesPlayed}</span>
-                              <span>Pts: {p.totalPoints}</span>
-                              <span>W: {p.wins}</span>
-                              <span>L: {p.losses}</span>
-                            </div>
-                          )}
-                        </>
+                        </div>
                       )}
                     </li>
                   );
                 })}
               </ul>
               {players.filter((p) => p.status !== "removed").length === 0 && (
-                <p className="text-center text-slate-500 text-sm py-4">
+                <p className="text-center text-[#2B6B8A]/70 text-sm py-4">
                   No players yet. Add above or select from Your regulars.
                 </p>
               )}
@@ -850,14 +1020,14 @@ export default function Home() {
                   disabled={!canStartSession}
                   className={`w-full rounded-xl py-4 sm:py-4 font-semibold touch-manipulation min-h-[52px] transition-all ${
                     canStartSession
-                      ? "bg-emerald-600 text-white hover:bg-emerald-500 active:bg-emerald-700"
-                      : "bg-slate-200 text-slate-500 cursor-not-allowed opacity-60"
+                      ? "bg-[#2DBDA8] text-white hover:bg-[#238F7E] active:bg-[#238F7E]"
+                      : "bg-[#B0BEC5] text-[#2B6B8A]/60 cursor-not-allowed opacity-60"
                   }`}
                 >
                   Start Session →
                 </button>
                 {!canStartSession && (
-                  <p className="text-center text-sm text-slate-600 mt-2">
+                  <p className="text-center text-sm text-[#2B6B8A]/80 mt-2">
                     Add at least {config.courts * 4} player{config.courts * 4 > 1 ? "s" : ""} to start ({config.courts} court{config.courts > 1 ? "s" : ""}).
                   </p>
                 )}
@@ -868,53 +1038,45 @@ export default function Home() {
 
         {/* --- Session Screen --- */}
         {screen === "session" && (
-          <div className="pt-4 sm:pt-6">
+          <div className={`min-w-0 overflow-x-hidden w-full max-w-[100vw] ${sessionActive && currentMatch ? "flex flex-col h-[calc(100vh-7rem)]" : ""}`}>
             {!sessionActive ? (
-              <div className="rounded-2xl bg-gray-100 p-6 text-center text-gray-600">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#2B6B8A]/80">
                 No active session. Start a session from Setup.
               </div>
             ) : !currentMatch ? (
-              <div className="rounded-2xl bg-gray-100 p-6 text-center text-gray-600">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#2B6B8A]/80">
                 No match found for Court {selectedCourt} in Round {currentRound}.
               </div>
             ) : (
               <>
-                {/* Header Bar (sticky below shared AppHeader) */}
-                <div className="sticky top-[8.5rem] z-10 bg-gray-50 border-b border-slate-200 px-4 py-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <h2 className="text-lg font-bold text-gray-900">Court {selectedCourt}</h2>
-                      <span className="text-sm text-gray-600">
-                        Round {currentRound} of {config.rounds}
-                      </span>
-                    </div>
-                    {/* Undo Button */}
-                    {undoStack.length > 0 && (
-                      <button
-                        type="button"
-                        onClick={undoLastAction}
-                        className="px-3 py-1.5 rounded-lg bg-gray-200 text-gray-700 text-sm font-medium hover:bg-gray-300 active:bg-gray-400 touch-manipulation min-h-[36px]"
-                        aria-label="Undo last action"
-                      >
-                        Undo
-                      </button>
-                    )}
-                  </div>
-                  
-                  {/* Progress Bar */}
-                  <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                {/* Add more rounds — tight under tab bar, no gap */}
+                {hasTimeLeftRecommendation && currentRound >= config.rounds && (
+                  <button
+                    type="button"
+                    onClick={() => setScreen("setup")}
+                    className="w-full text-left px-3 py-2 bg-[#E8F6F3] border-b border-[#E2E8F0] text-[#2B6B8A] text-sm font-medium hover:bg-[#E8F6F3]/80 active:bg-[#2DBDA8]/20 touch-manipulation shrink-0"
+                  >
+                    Add more rounds — tap Setup
+                  </button>
+                )}
+                {/* Court header + progress — 8px padding, directly above score zones */}
+                <div className="bg-[#F8F3E6] border-b border-[#E2E8F0] px-2 py-2 shrink-0">
+                  <h2 className="text-base font-bold text-[#2B6B8A]">
+                    Court {selectedCourt} · Round {currentRound} of {config.rounds}
+                  </h2>
+                  <div className="w-full h-1 bg-[#E2E8F0] rounded-full overflow-hidden mt-1">
                     <div
-                      className="h-full bg-green-600 transition-all duration-300"
+                      className="h-full bg-[#2DBDA8] transition-all duration-300"
                       style={{ width: `${(currentRound / config.rounds) * 100}%` }}
                     />
                   </div>
                 </div>
 
-                {/* Court Switcher Pills */}
-                {config.courts > 1 && (
-                  <div className="px-4 py-3 bg-gray-50 border-b border-gray-200">
-                    <div className="flex gap-2 overflow-x-auto pb-1">
-                      {Array.from({ length: config.courts }, (_, i) => i + 1).map((courtId) => {
+                {/* Court Switcher Pills — only courts with a match in the current round */}
+                {courtsWithMatchInCurrentRound.length > 1 && (
+                  <div className="px-2 py-1.5 bg-[#F8F3E6] border-b border-[#E2E8F0] shrink-0">
+                    <div className="flex gap-1.5 overflow-x-auto">
+                      {courtsWithMatchInCurrentRound.map((courtId) => {
                         const match = currentRoundMatches.find((m) => m.court === courtId);
                         const isSelected = selectedCourt === courtId;
                         const isComplete = match?.status === "completed";
@@ -926,13 +1088,13 @@ export default function Home() {
                             onClick={() => setSelectedCourt(courtId)}
                             className={`rounded-full px-4 py-2 text-sm font-semibold transition-all touch-manipulation min-h-[44px] shrink-0 ${
                               isSelected
-                                ? "bg-green-600 text-white shadow-md"
-                                : "bg-white text-gray-700 border-2 border-gray-300"
+                                ? "bg-[#2DBDA8] text-white shadow-md"
+                                : "bg-white text-[#2B6B8A] border-2 border-[#E2E8F0]"
                             }`}
                           >
                             Court {courtId}
                             {score && (
-                              <span className={`ml-2 text-xs ${isSelected ? "text-white/90" : "text-gray-600"}`}>
+                              <span className={`ml-2 text-xs ${isSelected ? "text-white/90" : "text-[#2B6B8A]/80"}`}>
                                 {score.teamA}-{score.teamB}
                               </span>
                             )}
@@ -944,7 +1106,7 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Split-Screen Tap Zones */}
+                {/* Split-Screen Tap Zones — fill remaining height, 50/50 with 2px divider */}
                 {(() => {
                   const match = currentMatch;
                   const score = match.score || { teamA: 0, teamB: 0 };
@@ -956,7 +1118,6 @@ export default function Home() {
                   const teamAWon = scoreA > scoreB;
                   const canConfirm = scoreA > 0 || scoreB > 0;
 
-                  // Haptic feedback helper
                   const vibrate = () => {
                     if (typeof navigator !== "undefined" && navigator.vibrate) {
                       navigator.vibrate(50);
@@ -964,118 +1125,109 @@ export default function Home() {
                   };
 
                   return (
-                    <div className="flex flex-col h-[calc(100vh-180px)] min-h-[600px]">
-                      {/* Team A Tap Zone - Top Half */}
+                    <div className="flex flex-col flex-1 min-h-0 min-w-0">
+                      {/* Team A — soft sage/mint */}
                       <div
                         onClick={() => {
                           if (!canIncrease || !match) return;
                           vibrate();
-                          const newScore = {
+                          updateMatchScore(currentRound, match.id, {
                             teamA: Math.min(config.pointsPerMatch, scoreA + 1),
                             teamB: scoreB,
-                          };
-                          updateMatchScore(currentRound, match.id, newScore);
+                          });
                         }}
-                        className={`relative flex-1 flex flex-col items-center justify-center p-6 transition-all touch-manipulation cursor-pointer ${
+                        style={!isMatchComplete ? { backgroundColor: "#E8F6F3" } : undefined}
+                        className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation cursor-pointer ${
                           isMatchComplete && teamAWon
-                            ? "bg-green-100 border-t-4 border-b-2 border-green-600"
+                            ? "bg-[#2DBDA8]/20"
                             : isMatchComplete
-                            ? "bg-gray-100 border-t-4 border-b-2 border-gray-300"
-                            : "bg-white hover:bg-gray-50 active:bg-green-50 border-t-4 border-b-2 border-gray-200"
+                            ? "bg-[#E2E8F0]/50"
+                            : "hover:opacity-95 active:opacity-90 transition-opacity"
                         } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        {/* Small -1 button in top-right corner */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (!match) return;
-                            vibrate();
-                            const newScore = { teamA: Math.max(0, scoreA - 1), teamB: scoreB };
-                            updateMatchScore(currentRound, match.id, newScore);
-                          }}
-                          className="absolute top-3 right-3 w-10 h-10 rounded-lg bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700 text-lg font-bold flex items-center justify-center touch-manipulation shadow-sm z-10"
-                          aria-label="Subtract 1 point for Team A"
-                        >
-                          −
-                        </button>
-
-                        <p className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                          Team A
-                        </p>
-                        <p className="text-base font-semibold text-gray-900 mb-6 text-center px-4">
+                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#2B6B8A" }}>
                           {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                         </p>
-                        <div className={`text-[72px] sm:text-[96px] font-bold ${isMatchComplete && teamAWon ? "text-green-600" : "text-gray-900"}`}>
+                        <div
+                          className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && teamAWon ? "text-[#2DBDA8]" : ""}`}
+                          style={!isMatchComplete || !teamAWon ? { color: "#2B6B8A" } : undefined}
+                        >
                           {scoreA}
                         </div>
                         {isMatchComplete && teamAWon && (
-                          <p className="mt-4 text-xl font-bold text-green-600">
-                            🏆 Winner!
-                          </p>
+                          <p className="mt-2 text-base font-bold text-[#2DBDA8]">🏆 Winner!</p>
                         )}
-                      </div>
-
-                      {/* Divider */}
-                      <div className="h-1 bg-gray-300"></div>
-
-                      {/* Team B Tap Zone - Bottom Half */}
-                      <div
-                        onClick={() => {
-                          if (!canIncrease || !match) return;
-                          vibrate();
-                          const newScore = {
-                            teamA: scoreA,
-                            teamB: Math.min(config.pointsPerMatch, scoreB + 1),
-                          };
-                          updateMatchScore(currentRound, match.id, newScore);
-                        }}
-                        className={`relative flex-1 flex flex-col items-center justify-center p-6 transition-all touch-manipulation cursor-pointer ${
-                          isMatchComplete && !teamAWon
-                            ? "bg-green-100 border-t-2 border-b-4 border-green-600"
-                            : isMatchComplete
-                            ? "bg-gray-100 border-t-2 border-b-4 border-gray-300"
-                            : "bg-white hover:bg-gray-50 active:bg-green-50 border-t-2 border-b-4 border-gray-200"
-                        } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
-                      >
-                        {/* Small -1 button in bottom-right corner */}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             if (!match) return;
                             vibrate();
-                            const newScore = { teamA: scoreA, teamB: Math.max(0, scoreB - 1) };
-                            updateMatchScore(currentRound, match.id, newScore);
+                            updateMatchScore(currentRound, match.id, { teamA: Math.max(0, scoreA - 1), teamB: scoreB });
                           }}
-                          className="absolute bottom-3 right-3 w-10 h-10 rounded-lg bg-gray-300 hover:bg-gray-400 active:bg-gray-500 text-gray-700 text-lg font-bold flex items-center justify-center touch-manipulation shadow-sm z-10"
-                          aria-label="Subtract 1 point for Team B"
+                          className="absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity"
+                          style={{ backgroundColor: "#2B6B8A" }}
+                          aria-label="Subtract 1 point"
                         >
-                          −
+                          −1
                         </button>
+                      </div>
 
-                        <p className="text-sm font-semibold text-gray-600 uppercase tracking-wider mb-2">
-                          Team B
-                        </p>
-                        <p className="text-base font-semibold text-gray-900 mb-6 text-center px-4">
+                      {/* Subtle divider */}
+                      <div className="h-0.5 shrink-0" style={{ backgroundColor: "#E2E8F0" }} />
+
+                      {/* Team B — light blue tint */}
+                      <div
+                        onClick={() => {
+                          if (!canIncrease || !match) return;
+                          vibrate();
+                          updateMatchScore(currentRound, match.id, {
+                            teamA: scoreA,
+                            teamB: Math.min(config.pointsPerMatch, scoreB + 1),
+                          });
+                        }}
+                        style={!isMatchComplete ? { backgroundColor: "#E8EEF3" } : undefined}
+                        className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation cursor-pointer ${
+                          isMatchComplete && !teamAWon
+                            ? "bg-[#2DBDA8]/20"
+                            : isMatchComplete
+                            ? "bg-[#E2E8F0]/50"
+                            : "hover:opacity-95 active:opacity-90 transition-opacity"
+                        } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
+                      >
+                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#2B6B8A" }}>
                           {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                         </p>
-                        <div className={`text-[72px] sm:text-[96px] font-bold ${isMatchComplete && !teamAWon ? "text-green-600" : "text-gray-900"}`}>
+                        <div
+                          className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && !teamAWon ? "text-[#2DBDA8]" : ""}`}
+                          style={!isMatchComplete || teamAWon ? { color: "#2B6B8A" } : undefined}
+                        >
                           {scoreB}
                         </div>
                         {isMatchComplete && !teamAWon && (
-                          <p className="mt-4 text-xl font-bold text-green-600">
-                            🏆 Winner!
-                          </p>
+                          <p className="mt-2 text-base font-bold text-[#2DBDA8]">🏆 Winner!</p>
                         )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (!match) return;
+                            vibrate();
+                            updateMatchScore(currentRound, match.id, { teamA: scoreA, teamB: Math.max(0, scoreB - 1) });
+                          }}
+                          className="absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity"
+                          style={{ backgroundColor: "#2B6B8A" }}
+                          aria-label="Subtract 1 point"
+                        >
+                          −1
+                        </button>
                       </div>
                     </div>
                   );
                 })()}
 
-                {/* Bottom Controls Bar */}
-                <div className="sticky bottom-0 bg-white border-t border-gray-200 px-4 py-3 space-y-2">
-                  {/* Match Complete Banner */}
+                {/* Bottom bar — Confirm, Reshuffle, Undo link, total */}
+                <div className="shrink-0 bg-white border-t border-[#E2E8F0] px-2 py-2 space-y-1.5 min-w-0">
                   {(() => {
                     const match = currentMatch;
                     const score = match?.score || { teamA: 0, teamB: 0 };
@@ -1085,31 +1237,69 @@ export default function Home() {
                     const isMatchComplete = totalScore === config.pointsPerMatch && totalScore > 0;
                     const teamAWon = scoreA > scoreB;
                     const canConfirm = scoreA > 0 || scoreB > 0;
+                    const teamANames = match ? match.teamA.playerIds.map((id) => getPlayer(id)?.name).filter(Boolean).join(" & ") : "";
+                    const teamBNames = match ? match.teamB.playerIds.map((id) => getPlayer(id)?.name).filter(Boolean).join(" & ") : "";
 
                     return (
                       <>
                         {isMatchComplete && (
-                          <div className="p-3 rounded-xl bg-green-100 border-2 border-green-600 mb-2">
-                            <p className="text-base font-bold text-green-800 text-center">
-                              🏆 {teamAWon ? "Team A wins!" : "Team B wins!"} ({scoreA}-{scoreB})
-                            </p>
-                          </div>
+                          <p className="text-sm font-bold text-[#2B6B8A] text-center break-words py-1">
+                            🏆 {teamAWon ? teamANames : teamBNames} win! ({scoreA}-{scoreB})
+                          </p>
                         )}
 
-                        <div className="flex gap-2">
+                        <div className="flex flex-col gap-1.5 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!currentMatch) return;
+                              completeMatch(currentRound, currentMatch.id);
+                              const allComplete = currentRoundMatches.every(
+                                (m) => m.status === "completed" || m.id === currentMatch.id
+                              );
+                              if (allComplete && currentRound < config.rounds) {
+                                setCurrentRound(currentRound + 1);
+                                setSelectedCourt(1);
+                              }
+                            }}
+                            disabled={!canConfirm}
+                            className="w-full rounded-xl bg-[#2DBDA8] py-3 text-sm font-semibold text-white hover:bg-[#238F7E] active:bg-[#238F7E] disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[48px] whitespace-nowrap"
+                          >
+                            {isMatchComplete ? "Log match" : "Confirm"}
+                          </button>
                           <button
                             type="button"
                             onClick={() => {
                               if (!currentMatch || !currentRoundData) return;
-                              const confirmed = window.confirm("Reshuffle with available players?");
+                              const confirmed = window.confirm("Reshuffle with available players? (Paused players are excluded.)");
                               if (!confirmed) return;
-                              // Collect the 4 players on this court and randomize into new teams
-                              const ids = [
+                              const currentIds = [
                                 ...currentMatch.teamA.playerIds,
                                 ...currentMatch.teamB.playerIds,
                               ];
-                              if (ids.length !== 4) return;
-                              const shuffled = [...ids].sort(() => Math.random() - 0.5);
+                              if (currentIds.length !== 4) return;
+                              // Only active players can be in a reshuffle; paused/removed are excluded
+                              const activeOnCourt = currentIds.filter((id) => {
+                                const p = players.find((x) => x.id === id);
+                                return p?.status === "active";
+                              });
+                              const activeSittingOut = (currentRoundData.sittingOut || []).filter((id) => {
+                                const p = players.find((x) => x.id === id);
+                                return p?.status === "active";
+                              });
+                              const pool = [...activeOnCourt];
+                              let need = 4 - pool.length;
+                              for (const id of activeSittingOut) {
+                                if (need <= 0 || pool.includes(id)) continue;
+                                pool.push(id);
+                                need--;
+                              }
+                              if (pool.length < 4) {
+                                window.alert("Not enough active players to reshuffle (need 4). Unpause players or add more.");
+                                return;
+                              }
+                              const four = pool.slice(0, 4);
+                              const shuffled = [...four].sort(() => Math.random() - 0.5);
                               const newMatch = {
                                 ...currentMatch,
                                 teamA: { playerIds: [shuffled[0], shuffled[1]] },
@@ -1120,46 +1310,27 @@ export default function Home() {
                               setSchedule(
                                 schedule.map((round) =>
                                   round.roundNumber === currentRound
-                                    ? {
-                                        ...round,
-                                        matches: round.matches.map((m) =>
-                                          m.court === selectedCourt ? newMatch : m
-                                        ),
-                                      }
+                                    ? { ...round, matches: round.matches.map((m) => (m.court === selectedCourt ? newMatch : m)) }
                                     : round
                                 )
                               );
                             }}
-                            className="flex-1 rounded-xl bg-gray-200 py-3 text-sm font-semibold text-gray-700 hover:bg-gray-300 active:bg-gray-400 touch-manipulation min-h-[48px]"
+                            className="text-sm text-[#2B6B8A]/80 hover:text-[#2B6B8A] underline touch-manipulation text-center"
                           >
                             Reshuffle match
                           </button>
+                        </div>
+                        {undoStack.length > 0 && (
                           <button
                             type="button"
-                            onClick={() => {
-                              if (!currentMatch) return;
-                              completeMatch(currentRound, currentMatch.id);
-                              // Check if all matches in round are complete, then advance
-                              const allComplete = currentRoundMatches.every(
-                                (m) => m.status === "completed" || m.id === currentMatch.id
-                              );
-                              if (allComplete && currentRound < config.rounds) {
-                                setCurrentRound(currentRound + 1);
-                                setSelectedCourt(1);
-                              }
-                            }}
-                            disabled={!canConfirm}
-                            className="flex-1 rounded-xl bg-green-600 py-3 text-sm font-semibold text-white hover:bg-green-700 active:bg-green-800 disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[48px]"
+                            onClick={undoLastAction}
+                            className="text-xs text-[#2B6B8A]/70 hover:text-[#2B6B8A] underline touch-manipulation"
+                            aria-label="Undo last action"
                           >
-                            {isMatchComplete
-                              ? `Log Match`
-                              : currentRound < config.rounds
-                              ? `Confirm & Next`
-                              : `Confirm (Final)`}
+                            Undo
                           </button>
-                        </div>
-
-                        <p className="text-xs text-gray-500 text-center">
+                        )}
+                        <p className="text-xs text-[#2B6B8A]/70 text-center">
                           Total: {totalScore} / {config.pointsPerMatch} points
                         </p>
                       </>
@@ -1167,12 +1338,11 @@ export default function Home() {
                   })()}
                 </div>
 
-                {/* Sitting Out Section */}
+                {/* Sitting Out — compact */}
                 {allSittingOut.length > 0 && (
-                  <div className="px-4 py-3 bg-gray-50 border-t border-gray-200">
-                    <h3 className="text-sm font-semibold text-gray-600 mb-1">Sitting out</h3>
-                    <p className="text-sm text-gray-700">
-                      {allSittingOut.map((id) => getPlayer(id)?.name).join(", ")}
+                  <div className="px-2 py-1.5 bg-[#F8F3E6] border-t border-[#E2E8F0] shrink-0">
+                    <p className="text-xs text-[#2B6B8A]/80">
+                      Sitting out: {allSittingOut.map((id) => getPlayer(id)?.name).join(", ")}
                     </p>
                   </div>
                 )}
@@ -1184,10 +1354,6 @@ export default function Home() {
         {/* --- Schedule Screen --- */}
         {screen === "schedule" && (
           <div className="space-y-4">
-            <p className="text-sm text-slate-600">
-              Full cross-court rotation per round. Each round shows all courts; players move to different courts next round.
-            </p>
-            
             {/* Filter chips */}
             {config.courts > 1 && (
               <div className="flex flex-wrap gap-2">
@@ -1196,8 +1362,8 @@ export default function Home() {
                   onClick={() => setScheduleFilterCourts(new Set())}
                   className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
                     scheduleFilterCourts.size === 0
-                      ? "bg-emerald-600 text-white"
-                      : "bg-slate-200 text-slate-700"
+                      ? "bg-[#2DBDA8] text-white"
+                      : "bg-[#E2E8F0] text-[#2B6B8A]"
                   }`}
                 >
                   All
@@ -1209,8 +1375,8 @@ export default function Home() {
                     onClick={() => setScheduleFilterCourts(new Set([courtId]))}
                     className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
                       scheduleFilterCourts.has(courtId)
-                        ? "bg-emerald-600 text-white"
-                        : "bg-slate-200 text-slate-600"
+                        ? "bg-[#2DBDA8] text-white"
+                        : "bg-[#E2E8F0] text-[#2B6B8A]"
                     }`}
                   >
                     Court {courtId}
@@ -1220,7 +1386,7 @@ export default function Home() {
             )}
 
             {schedule.length === 0 ? (
-              <div className="rounded-2xl bg-slate-100 border border-slate-200 p-6 text-center text-slate-600">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#2B6B8A]/80">
                 No schedule yet. Start a session from Setup.
               </div>
             ) : (
@@ -1228,7 +1394,7 @@ export default function Home() {
                 {schedule.map((round) => {
                   const isCurrent = round.roundNumber === currentRound;
                   const isPast = round.roundNumber < currentRound;
-                  // Full cross-court rotation: show all courts 1..N in order for this round
+                  const isFuture = round.roundNumber > currentRound;
                   const matchesByCourt = new Map(round.matches.map((m) => [m.court, m]));
                   const courtsToShow = scheduleFilterCourts.size === 0
                     ? Array.from({ length: config.courts }, (_, i) => i + 1)
@@ -1237,18 +1403,18 @@ export default function Home() {
                   return (
                     <section
                       key={round.roundNumber}
-                      className={`rounded-2xl border p-4 ${
+                      className={`rounded-2xl border border-[#E2E8F0] bg-white p-4 ${
                         isCurrent
-                          ? "border-emerald-500 bg-emerald-50"
-                          : isPast
-                          ? "border-slate-200 bg-slate-50 opacity-90"
-                          : "border-slate-200 bg-white"
+                          ? "border-l-4 border-l-[#2DBDA8]"
+                          : isFuture
+                          ? "opacity-75"
+                          : ""
                       }`}
                     >
-                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-slate-800">
-                        Round {round.roundNumber} — Cross-court rotation
-                        {isCurrent && <span className="text-xs font-normal text-emerald-600">(current)</span>}
-                        {isPast && <span className="text-xs font-normal text-slate-500">(played)</span>}
+                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-[#2B6B8A]">
+                        Round {round.roundNumber}
+                        {isCurrent && <span className="text-xs font-normal text-[#2DBDA8]">(current)</span>}
+                        {isPast && <span className="text-xs font-normal text-[#94A3B8]">(played)</span>}
                       </h3>
                       <div className="space-y-3">
                         {courtsToShow.map((courtId) => {
@@ -1258,28 +1424,28 @@ export default function Home() {
                           const isComplete = match.status === "completed";
                           const teamAWon = score && score.teamA > score.teamB;
                           return (
-                            <div key={match.id} className="text-sm space-y-1 pl-2 border-l-2 border-slate-300">
-                              <div className="font-medium text-slate-500 text-xs">Court {courtId}</div>
-                              <div className={`flex flex-wrap items-center gap-2 ${isComplete && teamAWon ? "text-emerald-600" : ""}`}>
-                                <span className={`font-medium ${isComplete && teamAWon ? "text-emerald-600" : "text-slate-800"}`}>
+                            <div key={match.id} className="text-sm space-y-1 pl-2 border-l-2 border-[#E2E8F0]">
+                              <div className="font-medium text-[#2B6B8A]/70 text-xs">Court {courtId}</div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className={isComplete && teamAWon ? "font-bold text-[#2B6B8A]" : "font-normal text-[#2B6B8A]"}>
                                   {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                                 </span>
-                                <span className="text-slate-500">vs</span>
-                                <span className={`font-medium ${isComplete && !teamAWon ? "text-emerald-600" : "text-slate-800"}`}>
+                                <span className="text-[#2B6B8A]/60">vs</span>
+                                <span className={isComplete && !teamAWon ? "font-bold text-[#2B6B8A]" : "font-normal text-[#2B6B8A]"}>
                                   {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                                 </span>
                               </div>
                               {score && (
                                 <div className="pt-1">
                                   <p className="text-base font-semibold">
-                                    <span className={teamAWon ? "text-emerald-600" : "text-slate-600"}>
+                                    <span className={teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
                                       {score.teamA}
                                     </span>
-                                    <span className="text-slate-400 mx-2">-</span>
-                                    <span className={!teamAWon ? "text-emerald-600" : "text-slate-600"}>
+                                    <span className="text-[#2B6B8A]/50 mx-2">-</span>
+                                    <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
                                       {score.teamB}
                                     </span>
-                                    <span className="text-slate-500 ml-2 text-sm font-normal">
+                                    <span className="text-[#94A3B8] ml-2 text-sm font-normal">
                                       ({teamAWon ? "Team A wins" : "Team B wins"})
                                     </span>
                                   </p>
@@ -1290,7 +1456,7 @@ export default function Home() {
                         })}
                       </div>
                       {round.sittingOut.length > 0 && (
-                        <p className="text-xs text-slate-500 mt-3 pt-2 border-t border-slate-200">
+                        <p className="text-xs text-[#2B6B8A]/70 mt-3 pt-2 border-t border-[#E2E8F0]">
                           Sit out: {round.sittingOut.map((id) => getPlayer(id)?.name).join(", ")}
                         </p>
                       )}
@@ -1306,14 +1472,14 @@ export default function Home() {
         {screen === "leaderboard" && (
           <div className="space-y-4">
             {!leaderboardSorted.some((p) => (p.gamesPlayed ?? 0) > 0) ? (
-              <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-                <p className="text-slate-600">No matches played yet. Start a session to see rankings.</p>
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 text-center">
+                <p className="text-[#2B6B8A]/80">No matches played yet. Start a session to see rankings.</p>
               </div>
             ) : (
-              <div className="rounded-2xl overflow-hidden border border-slate-200 bg-white">
+              <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white">
                 <table className="w-full text-left table-fixed">
                   <thead>
-                    <tr className="bg-slate-100 text-slate-600 text-xs uppercase tracking-wider">
+                    <tr className="bg-[#E2E8F0]/40 text-[#2B6B8A]/80 text-xs uppercase tracking-wider">
                       <th className="py-3 pl-4 font-semibold w-[40%]">Name</th>
                       <th className="py-3 font-semibold text-center w-[20%]">Matches Played</th>
                       <th className="py-3 font-semibold text-right pr-2 w-[15%]">PTS</th>
@@ -1329,18 +1495,18 @@ export default function Home() {
                       return (
                         <tr
                           key={p.id}
-                          className={`border-t border-slate-200 ${hasPlayed && i < 3 ? "bg-amber-50/60" : ""}`}
+                          className={`border-t border-[#E2E8F0] ${hasPlayed && i < 3 ? "bg-[#E8F6F3]/50" : ""}`}
                         >
-                          <td className="py-3 pl-4 font-medium text-slate-900 truncate">
+                          <td className="py-3 pl-4 font-medium text-[#2B6B8A] truncate">
                             {medal}
                             {p.name}
                           </td>
-                          <td className="py-3 text-center text-slate-700">{p.gamesPlayed ?? 0}</td>
-                          <td className="py-3 text-right pr-2 text-lg font-bold text-emerald-600">
+                          <td className="py-3 text-center text-[#2B6B8A]/90">{p.gamesPlayed ?? 0}</td>
+                          <td className="py-3 text-right pr-2 text-lg font-bold text-[#2DBDA8]">
                             {p.totalPoints ?? 0}
                           </td>
-                          <td className="py-3 text-center text-lg font-bold text-green-600">{p.wins ?? 0}</td>
-                          <td className="py-3 text-center pr-4 text-lg font-bold text-red-600">{p.losses ?? 0}</td>
+                          <td className="py-3 text-center text-lg font-bold text-[#2DBDA8]">{p.wins ?? 0}</td>
+                          <td className="py-3 text-center pr-4 text-lg font-bold text-[#C0444E]">{p.losses ?? 0}</td>
                         </tr>
                       );
                     })}
@@ -1349,7 +1515,7 @@ export default function Home() {
               </div>
             )}
             {leaderboardSorted.length > 0 && (
-              <p className="text-xs text-slate-500 text-center">
+              <p className="text-xs text-[#2B6B8A]/70 text-center">
                 Sorted by total Americano points, then wins.
               </p>
             )}
@@ -1362,7 +1528,7 @@ export default function Home() {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="rounded-lg bg-gray-900 text-white text-sm font-medium px-4 py-2.5 shadow-lg border border-gray-700"
+            className="rounded-lg bg-[#2B6B8A] text-white text-sm font-medium px-4 py-2.5 shadow-lg border border-[#2B6B8A]/80"
           >
             {t.message}
           </div>

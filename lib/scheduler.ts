@@ -1,9 +1,9 @@
 import { Player, Round, Match, Algorithm } from "./store";
 
 /**
- * Generate a unique match ID
+ * Generate a unique match ID (exported for creating matches when adding courts mid-session)
  */
-function generateMatchId(): string {
+export function generateMatchId(): string {
   return Math.random().toString(36).slice(2, 11);
 }
 
