@@ -20,11 +20,11 @@ const SKILL_HEX: Record<1 | 2 | 3 | 4 | 5, string> = {
   2: "#A8DDD2",
   3: "#2DBDA8",
   4: "#238F7E",
-  5: "#2B6B8A",
+  5: "#1E3A5F",
 };
 
 function skillPillStyle(skill: 1 | 2 | 3 | 4 | 5): { bg: string; textClass: string } {
-  const deepBlueText = "text-[#2B6B8A]";
+  const deepBlueText = "text-[#1E3A5F]";
   const whiteText = "text-white";
   return {
     bg: SKILL_HEX[skill],
@@ -47,18 +47,18 @@ function AppHeader({
     { id: "leaderboard", label: "Leaderboard" },
   ];
   return (
-    <header className="sticky top-0 z-30 bg-[#F8F3E6] border-b border-[#E2E8F0] pb-4 sm:pb-6">
-      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#2B6B8A] mb-4 sm:mb-6 pt-4 sm:pt-6">
+    <header className="sticky top-0 z-30 bg-white border-b border-[#E2E8F0] px-3 sm:px-4 pb-3">
+      <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#2DBDA8] pt-4 sm:pt-6 pb-3">
         gaspadel
       </h1>
-      <nav className="flex gap-1 rounded-xl bg-[#E2E8F0]/80 p-1 overflow-x-auto">
+      <nav className="flex gap-1 rounded-xl bg-[#F1F5F9] p-1.5 overflow-x-auto">
         {tabs.map(({ id, label }) => (
           <button
             key={id}
             type="button"
             onClick={() => setScreen(id)}
-            className={`flex-1 min-w-0 rounded-lg py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${
-              screen === id ? "bg-[#2DBDA8] text-white" : "text-[#2B6B8A] hover:opacity-80"
+            className={`flex-1 min-w-0 rounded-full py-3 sm:py-2.5 text-sm font-medium transition shrink-0 touch-manipulation min-h-[44px] sm:min-h-0 ${
+              screen === id ? "bg-[#2DBDA8] text-white" : "text-[#1A1A1A] hover:opacity-80"
             }`}
           >
             {label}
@@ -110,6 +110,7 @@ export default function Home() {
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
   const [sessionDuration, setSessionDuration] = useState<number>(60);
   const [durationOptions, setDurationOptions] = useState<number[]>([60, 120, 180]);
+  const [algorithmExpanded, setAlgorithmExpanded] = useState(false);
 
   const addToast = useCallback((message: string) => {
     const id = Math.random().toString(36).slice(2, 9);
@@ -425,7 +426,7 @@ export default function Home() {
 
 
   return (
-    <div className="min-h-screen font-sans bg-[#F8F3E6] text-[#2B6B8A]">
+    <div className="min-h-screen font-sans bg-[#FFFFFF] text-[#1A1A1A]">
       <div className="mx-auto max-w-lg min-w-0 w-full px-3 sm:px-4 pb-20 sm:pb-24 safe-area-pb box-border">
         <AppHeader screen={screen} setScreen={setScreen} />
 
@@ -437,8 +438,8 @@ export default function Home() {
               <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-[#2B6B8A]">Session Active</p>
-                    <p className="text-xs text-[#2B6B8A]/80 mt-1">
+                    <p className="text-sm font-semibold text-[#1E3A5F]">Session Active</p>
+                    <p className="text-xs text-[#64748B] mt-1">
                       Round {currentRound} of {config.rounds}
                     </p>
                   </div>
@@ -455,7 +456,7 @@ export default function Home() {
 
             {/* Courts: always editable on Setup, including mid-session */}
             <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
-              <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Courts</h2>
+              <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Courts</h2>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -474,12 +475,12 @@ export default function Home() {
                     }
                   }}
                   disabled={config.courts === 1}
-                  className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#E2E8F0] hover:bg-[#E2E8F0]/80 disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#2B6B8A] text-xl font-bold touch-manipulation"
+                  className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
                   aria-label="Decrease courts"
                 >
                   −
                 </button>
-                <div className="flex-1 min-w-0 rounded-xl bg-[#E2E8F0]/30 px-4 py-3 text-center text-lg font-semibold text-[#2B6B8A] border border-[#E2E8F0]">
+                <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-3 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
                   {config.courts} court{config.courts !== 1 ? "s" : ""}
                 </div>
                 <button
@@ -530,7 +531,7 @@ export default function Home() {
                 </button>
               </div>
               {sessionActive && (
-                <p className="text-xs text-[#2B6B8A]/70 mt-2">
+                <p className="text-xs text-[#64748B] mt-2">
                   Current round updated if 4+ sitting out; future rounds use {config.courts} court{config.courts !== 1 ? "s" : ""}.
                 </p>
               )}
@@ -540,8 +541,9 @@ export default function Home() {
             {!sessionActive && (
               <>
                 <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4">
+                  <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Duration / Match length</h2>
                   <div>
-                    <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Duration</h2>
+                    <p className="text-xs text-[#64748B] mb-1.5">Duration</p>
                     <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
                       {durationOptions.map((mins) => (
                         <button
@@ -551,7 +553,7 @@ export default function Home() {
                           className={`shrink-0 rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
                             sessionDuration === mins
                               ? "bg-[#2DBDA8] text-white"
-                              : "bg-[#E2E8F0]/50 text-[#2B6B8A] hover:bg-[#E2E8F0]"
+                              : "bg-[#F1F5F9] text-[#1A1A1A] hover:bg-[#E2E8F0]"
                           }`}
                         >
                           {mins} min
@@ -564,7 +566,7 @@ export default function Home() {
                           setDurationOptions((prev) => [...prev, next]);
                           setSessionDuration(next);
                         }}
-                        className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-[#E2E8F0]/50 text-[#2B6B8A] hover:bg-[#E2E8F0] transition touch-manipulation"
+                        className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-[#F1F5F9] text-[#1A1A1A] hover:bg-[#E2E8F0] transition touch-manipulation"
                         aria-label="Add 60 minutes"
                       >
                         +
@@ -573,7 +575,7 @@ export default function Home() {
                   </div>
 
                   <div>
-                    <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Match length</h2>
+                    <p className="text-xs text-[#64748B] mb-1.5">Match length</p>
                     <div className="flex gap-2 flex-wrap">
                       {[16, 21, 32].map((pts) => (
                         <button
@@ -583,7 +585,7 @@ export default function Home() {
                           className={`rounded-full px-4 py-2.5 text-sm font-medium transition touch-manipulation ${
                             config.pointsPerMatch === pts
                               ? "bg-[#2DBDA8] text-white"
-                              : "bg-[#E2E8F0]/50 text-[#2B6B8A] hover:bg-[#E2E8F0]"
+                              : "bg-[#F1F5F9] text-[#1A1A1A] hover:bg-[#E2E8F0]"
                           }`}
                         >
                           {pts} pts
@@ -593,20 +595,20 @@ export default function Home() {
                   </div>
                 </section>
 
-                {/* Rounds: header, stepper (same width as Courts), summary on own line */}
+                {/* Rounds: same card height as Courts; recommendation in small teal */}
                 <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3">
-                  <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Rounds</h2>
+                  <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
                       onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
                       disabled={config.rounds === 1}
-                      className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#E2E8F0] hover:bg-[#E2E8F0]/80 disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#2B6B8A] text-xl font-bold touch-manipulation"
+                      className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#1E3A5F] text-xl font-bold touch-manipulation"
                       aria-label="Decrease rounds"
                     >
                       −
                     </button>
-                    <div className="flex-1 min-w-0 rounded-xl bg-[#E2E8F0]/30 px-4 py-2.5 text-center text-lg font-semibold text-[#2B6B8A] border border-[#E2E8F0]">
+                    <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
                       {config.rounds}
                     </div>
                     <button
@@ -622,90 +624,88 @@ export default function Home() {
                     <button
                       type="button"
                       onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
-                      className="text-sm text-[#2DBDA8] hover:text-[#238F7E] hover:underline text-center w-full touch-manipulation"
+                      className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
                     >
                       Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
                     </button>
                   )}
                 </section>
 
-                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4">
-                <div>
-                  <h3 className="text-xs font-semibold text-[#2B6B8A] mb-2">Matching Algorithm</h3>
-                    <div className="flex flex-col gap-2">
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
+                  <button
+                    type="button"
+                    onClick={() => setAlgorithmExpanded((e) => !e)}
+                    className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-[#F1F5F9] hover:bg-[#E2E8F0] border border-[#E2E8F0] touch-manipulation"
+                    aria-expanded={algorithmExpanded}
+                  >
+                    <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
+                  </button>
+                  {algorithmExpanded && (
+                    <div className="flex flex-col gap-2 mt-2">
                       <button
                         type="button"
                         onClick={() => {
-                    setConfig({ algorithm: "balanced" });
-                    if (sessionActive) {
-                      // Regenerate from NEXT round to preserve current round in progress
-                      const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
-                      setSchedule(newSchedule);
-                    }
+                          setConfig({ algorithm: "balanced" });
+                          if (sessionActive) {
+                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
+                            setSchedule(newSchedule);
+                          }
                         }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
                           config.algorithm === "balanced"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#2B6B8A]"
-                            : "border-[#E2E8F0] bg-[#E2E8F0]/50 text-[#2B6B8A]"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
                         }`}
                       >
                         <div className="font-semibold">Balanced</div>
-                        <p className="text-xs text-[#2B6B8A]/80">
-                          Balance skill levels across teams for fair matchups.
-                        </p>
+                        <p className="text-xs text-[#64748B]">Balance skill levels across teams for fair matchups.</p>
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                    setConfig({ algorithm: "random" });
-                    if (sessionActive) {
-                      // Regenerate from NEXT round to preserve current round in progress
-                      const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
-                      setSchedule(newSchedule);
-                    }
+                          setConfig({ algorithm: "random" });
+                          if (sessionActive) {
+                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
+                            setSchedule(newSchedule);
+                          }
                         }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
                           config.algorithm === "random"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#2B6B8A]"
-                            : "border-[#E2E8F0] bg-[#E2E8F0]/50 text-[#2B6B8A]"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
                         }`}
                       >
                         <div className="font-semibold">Random</div>
-                        <p className="text-xs text-[#2B6B8A]/80">
-                          Fully randomized matchups, ignoring skill ratings.
-                        </p>
+                        <p className="text-xs text-[#64748B]">Fully randomized matchups, ignoring skill ratings.</p>
                       </button>
                       <button
                         type="button"
                         onClick={() => {
-                    setConfig({ algorithm: "king" });
-                    if (sessionActive) {
-                      // Regenerate from NEXT round to preserve current round in progress
-                      const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
-                      setSchedule(newSchedule);
-                    }
+                          setConfig({ algorithm: "king" });
+                          if (sessionActive) {
+                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
+                            setSchedule(newSchedule);
+                          }
                         }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm sm:text-base border ${
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
                           config.algorithm === "king"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#2B6B8A]"
-                            : "border-[#E2E8F0] bg-[#E2E8F0]/50 text-[#2B6B8A]"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
                         }`}
                       >
                         <div className="font-semibold">King of the Court</div>
-                        <p className="text-xs text-[#2B6B8A]/80">
-                          Winning team stays on court; losing team rotates off.
-                        </p>
+                        <p className="text-xs text-[#64748B]">Winning team stays on court; losing team rotates off.</p>
                       </button>
                     </div>
-                  </div>
+                  )}
                 </section>
               </>
               )}
 
-            {/* When session active: Courts (above) + prominent Rounds + Players only */}
+            {/* When session active: Courts (above) + Rounds same height + Players only */}
             {sessionActive && (
               <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3">
-                <h2 className="text-sm font-semibold text-[#2B6B8A] mb-2">Rounds</h2>
+                <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
@@ -714,12 +714,12 @@ export default function Home() {
                       setConfig({ rounds: newRounds });
                     }}
                     disabled={config.rounds <= currentRound}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#E2E8F0] hover:bg-[#E2E8F0]/80 disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#2B6B8A] text-xl font-bold touch-manipulation"
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
                     aria-label="Decrease rounds"
                   >
                     −
                   </button>
-                  <div className="flex-1 min-w-0 rounded-xl bg-[#E2E8F0]/30 px-4 py-2.5 text-center text-lg font-semibold text-[#2B6B8A] border border-[#E2E8F0]">
+                  <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
                     {config.rounds}
                   </div>
                   <button
@@ -731,7 +731,7 @@ export default function Home() {
                     +
                   </button>
                 </div>
-                <p className="text-xs text-[#2B6B8A]/70 text-center">
+                <p className="text-xs text-[#64748B] text-center">
                   {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining
                 </p>
                 {activePlayers.length >= 4 && (
@@ -742,7 +742,7 @@ export default function Home() {
                       const newRounds = Math.max(currentRound, recommended);
                       setRoundsWithSchedule(newRounds);
                     }}
-                    className="text-sm text-[#2DBDA8] hover:text-[#238F7E] hover:underline text-center w-full touch-manipulation"
+                    className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
                   >
                     Recommended: {balancedRoundParams.balancedRounds} (balanced play)
                   </button>
@@ -752,15 +752,15 @@ export default function Home() {
 
             <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-[#2B6B8A]">Players</h2>
+                <h2 className="text-sm font-semibold text-[#1A1A1A]">Players</h2>
                 <div className="flex items-center gap-2">
-                  <span className={`text-sm font-semibold ${activePlayers.length >= config.courts * 4 ? "text-[#2DBDA8]" : "text-[#2B6B8A]/80"}`}>
+                  <span className={`text-sm font-semibold ${activePlayers.length >= config.courts * 4 ? "text-[#2DBDA8]" : "text-[#64748B]"}`}>
                     {activePlayers.length}
                   </span>
-                  <span className="text-xs text-[#2B6B8A]/70">/ {config.courts * 4} min</span>
+                  <span className="text-xs text-[#64748B]">/ {config.courts * 4} min</span>
                 </div>
               </div>
-              <p className="text-xs text-[#2B6B8A]/80 mb-3">
+              <p className="text-xs text-[#64748B] mb-3">
                 Need at least {config.courts * 4} to start ({config.courts} court{config.courts > 1 ? "s" : ""}). You can add more during the session.
               </p>
 
@@ -770,8 +770,8 @@ export default function Home() {
                 const regularsNotInRoster = savedRoster.filter((sp) => !currentIds.has(sp.id));
                 if (regularsNotInRoster.length === 0) return null;
                 return (
-                  <div className="mb-4 rounded-xl bg-[#E2E8F0]/30 border border-[#E2E8F0] p-3">
-                    <h3 className="text-xs font-semibold text-[#2B6B8A] mb-2">Your regulars</h3>
+                  <div className="mb-4 rounded-xl bg-[#F1F5F9] border border-[#E2E8F0] p-3">
+                    <h3 className="text-xs font-semibold text-[#1E3A5F] mb-2">Your regulars</h3>
                     <div className="flex flex-wrap gap-2">
                       {regularsNotInRoster.map((sp) => (
                         <label
@@ -791,7 +791,7 @@ export default function Home() {
                             }}
                             className="rounded border-[#E2E8F0] text-[#2DBDA8] focus:ring-[#2DBDA8]"
                           />
-                          <span className="text-sm text-[#2B6B8A]">{sp.name}</span>
+                          <span className="text-sm text-[#1E3A5F]">{sp.name}</span>
                           {config.algorithm === "balanced" && (
                             <span
                               className={`rounded-full px-1.5 h-5 flex items-center justify-center text-[10px] font-bold shrink-0 ${skillPillStyle(sp.skill).textClass}`}
@@ -824,7 +824,7 @@ export default function Home() {
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && addPlayer()}
-                  className="flex-1 min-w-0 rounded-xl bg-white px-4 py-2.5 text-[#2B6B8A] placeholder-[#B0BEC5] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
+                  className="flex-1 min-w-0 rounded-xl bg-white px-4 py-2.5 text-[#1A1A1A] placeholder-[#B0BEC5] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                 />
                 {config.algorithm === "balanced" && (
                   <div className="relative inline-flex shrink-0">
@@ -879,14 +879,14 @@ export default function Home() {
                               if (e.key === "Enter") saveEditedPlayer();
                               if (e.key === "Escape") cancelEditingPlayer();
                             }}
-                            className="w-full rounded-lg bg-white px-3 py-2 text-[#2B6B8A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
+                            className="w-full rounded-lg bg-white px-3 py-2 text-[#1A1A1A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                             autoFocus
                           />
                           {config.algorithm === "balanced" && (
                             <select
                               value={editingPlayerSkill}
                               onChange={(e) => setEditingPlayerSkill(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
-                              className="w-full rounded-lg bg-white px-3 py-2 text-[#2B6B8A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
+                              className="w-full rounded-lg bg-white px-3 py-2 text-[#1A1A1A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                             >
                               {SKILL_OPTIONS.map((o) => (
                                 <option key={o.value} value={o.value}>{o.label}</option>
@@ -904,7 +904,7 @@ export default function Home() {
                             <button
                               type="button"
                               onClick={cancelEditingPlayer}
-                              className="flex-1 rounded-lg bg-[#E2E8F0] px-3 py-2 text-sm font-medium text-[#2B6B8A] hover:bg-[#E2E8F0]/80 touch-manipulation"
+                              className="flex-1 rounded-lg bg-[#E2E8F0] px-3 py-2 text-sm font-medium text-[#1E3A5F] hover:bg-[#E2E8F0]/80 touch-manipulation"
                             >
                               Cancel
                             </button>
@@ -916,12 +916,12 @@ export default function Home() {
                             <button
                               type="button"
                               onClick={() => startEditingPlayer(p)}
-                              className={`text-left text-sm font-medium hover:text-[#2DBDA8] transition-colors break-words w-full ${isPaused ? "text-[#B0BEC5]" : "text-[#2B6B8A]"}`}
+                              className={`text-left text-sm font-medium hover:text-[#2DBDA8] transition-colors break-words w-full ${isPaused ? "text-[#B0BEC5]" : "text-[#1E3A5F]"}`}
                             >
                               {p.name}
                             </button>
                             {isPaused && (
-                              <span className="text-xs text-[#2B6B8A]/70 block mt-0.5">Paused</span>
+                              <span className="text-xs text-[#64748B] block mt-0.5">Paused</span>
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
@@ -963,7 +963,7 @@ export default function Home() {
                               <button
                                 type="button"
                                 onClick={() => handlePausePlayer(p.id)}
-                                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E2E8F0] text-[#2B6B8A] hover:bg-[#E2E8F0]/80 touch-manipulation"
+                                className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E2E8F0] text-[#1E3A5F] hover:bg-[#E2E8F0]/80 touch-manipulation"
                                 aria-label={`Pause ${p.name}`}
                               >
                                 <span className="text-sm leading-none" aria-hidden>⏸</span>
@@ -982,7 +982,7 @@ export default function Home() {
                                 <button
                                   type="button"
                                   onClick={() => setDeleteConfirmId(null)}
-                                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E2E8F0] text-[#2B6B8A] hover:bg-[#E2E8F0]/80 touch-manipulation"
+                                  className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#E2E8F0] text-[#1E3A5F] hover:bg-[#E2E8F0]/80 touch-manipulation"
                                   aria-label="Cancel"
                                 >
                                   ✕
@@ -1006,7 +1006,7 @@ export default function Home() {
                 })}
               </ul>
               {players.filter((p) => p.status !== "removed").length === 0 && (
-                <p className="text-center text-[#2B6B8A]/70 text-sm py-4">
+                <p className="text-center text-[#64748B] text-sm py-4">
                   No players yet. Add above or select from Your regulars.
                 </p>
               )}
@@ -1021,13 +1021,13 @@ export default function Home() {
                   className={`w-full rounded-xl py-4 sm:py-4 font-semibold touch-manipulation min-h-[52px] transition-all ${
                     canStartSession
                       ? "bg-[#2DBDA8] text-white hover:bg-[#238F7E] active:bg-[#238F7E]"
-                      : "bg-[#B0BEC5] text-[#2B6B8A]/60 cursor-not-allowed opacity-60"
+                      : "bg-[#B0BEC5] text-[#64748B] cursor-not-allowed opacity-60"
                   }`}
                 >
                   Start Session →
                 </button>
                 {!canStartSession && (
-                  <p className="text-center text-sm text-[#2B6B8A]/80 mt-2">
+                  <p className="text-center text-sm text-[#64748B] mt-2">
                     Add at least {config.courts * 4} player{config.courts * 4 > 1 ? "s" : ""} to start ({config.courts} court{config.courts > 1 ? "s" : ""}).
                   </p>
                 )}
@@ -1040,11 +1040,11 @@ export default function Home() {
         {screen === "session" && (
           <div className={`min-w-0 overflow-x-hidden w-full max-w-[100vw] ${sessionActive && currentMatch ? "flex flex-col h-[calc(100vh-7rem)]" : ""}`}>
             {!sessionActive ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#2B6B8A]/80">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B]">
                 No active session. Start a session from Setup.
               </div>
             ) : !currentMatch ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#2B6B8A]/80">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B]">
                 No match found for Court {selectedCourt} in Round {currentRound}.
               </div>
             ) : (
@@ -1054,14 +1054,14 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => setScreen("setup")}
-                    className="w-full text-left px-3 py-2 bg-[#E8F6F3] border-b border-[#E2E8F0] text-[#2B6B8A] text-sm font-medium hover:bg-[#E8F6F3]/80 active:bg-[#2DBDA8]/20 touch-manipulation shrink-0"
+                    className="w-full text-left px-3 py-2 bg-[#F1F5F9] border-b border-[#E2E8F0] text-[#1E3A5F] text-sm font-medium hover:bg-[#E2E8F0] active:bg-[#2DBDA8]/20 touch-manipulation shrink-0"
                   >
                     Add more rounds — tap Setup
                   </button>
                 )}
                 {/* Court header + progress — 8px padding, directly above score zones */}
-                <div className="bg-[#F8F3E6] border-b border-[#E2E8F0] px-2 py-2 shrink-0">
-                  <h2 className="text-base font-bold text-[#2B6B8A]">
+                <div className="bg-[#FFFFFF] border-b border-[#E2E8F0] px-2 py-2 shrink-0">
+                  <h2 className="text-base font-bold text-[#1E3A5F]">
                     Court {selectedCourt} · Round {currentRound} of {config.rounds}
                   </h2>
                   <div className="w-full h-1 bg-[#E2E8F0] rounded-full overflow-hidden mt-1">
@@ -1074,7 +1074,7 @@ export default function Home() {
 
                 {/* Court Switcher Pills — only courts with a match in the current round */}
                 {courtsWithMatchInCurrentRound.length > 1 && (
-                  <div className="px-2 py-1.5 bg-[#F8F3E6] border-b border-[#E2E8F0] shrink-0">
+                  <div className="px-2 py-1.5 bg-[#FFFFFF] border-b border-[#E2E8F0] shrink-0">
                     <div className="flex gap-1.5 overflow-x-auto">
                       {courtsWithMatchInCurrentRound.map((courtId) => {
                         const match = currentRoundMatches.find((m) => m.court === courtId);
@@ -1089,12 +1089,12 @@ export default function Home() {
                             className={`rounded-full px-4 py-2 text-sm font-semibold transition-all touch-manipulation min-h-[44px] shrink-0 ${
                               isSelected
                                 ? "bg-[#2DBDA8] text-white shadow-md"
-                                : "bg-white text-[#2B6B8A] border-2 border-[#E2E8F0]"
+                                : "bg-[#F1F5F9] text-[#1A1A1A] border-2 border-[#E2E8F0]"
                             }`}
                           >
                             Court {courtId}
                             {score && (
-                              <span className={`ml-2 text-xs ${isSelected ? "text-white/90" : "text-[#2B6B8A]/80"}`}>
+                              <span className={`ml-2 text-xs ${isSelected ? "text-white/90" : "text-[#64748B]"}`}>
                                 {score.teamA}-{score.teamB}
                               </span>
                             )}
@@ -1136,7 +1136,7 @@ export default function Home() {
                             teamB: scoreB,
                           });
                         }}
-                        style={!isMatchComplete ? { backgroundColor: "#E8F6F3" } : undefined}
+                        style={!isMatchComplete ? { backgroundColor: "#F1F5F9" } : undefined}
                         className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation cursor-pointer ${
                           isMatchComplete && teamAWon
                             ? "bg-[#2DBDA8]/20"
@@ -1145,12 +1145,12 @@ export default function Home() {
                             : "hover:opacity-95 active:opacity-90 transition-opacity"
                         } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#2B6B8A" }}>
+                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#1A1A1A" }}>
                           {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                         </p>
                         <div
                           className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && teamAWon ? "text-[#2DBDA8]" : ""}`}
-                          style={!isMatchComplete || !teamAWon ? { color: "#2B6B8A" } : undefined}
+                          style={!isMatchComplete || !teamAWon ? { color: "#1A1A1A" } : undefined}
                         >
                           {scoreA}
                         </div>
@@ -1166,7 +1166,7 @@ export default function Home() {
                             updateMatchScore(currentRound, match.id, { teamA: Math.max(0, scoreA - 1), teamB: scoreB });
                           }}
                           className="absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity"
-                          style={{ backgroundColor: "#2B6B8A" }}
+                          style={{ backgroundColor: "#1E3A5F" }}
                           aria-label="Subtract 1 point"
                         >
                           −1
@@ -1186,7 +1186,7 @@ export default function Home() {
                             teamB: Math.min(config.pointsPerMatch, scoreB + 1),
                           });
                         }}
-                        style={!isMatchComplete ? { backgroundColor: "#E8EEF3" } : undefined}
+                        style={!isMatchComplete ? { backgroundColor: "#F1F5F9" } : undefined}
                         className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation cursor-pointer ${
                           isMatchComplete && !teamAWon
                             ? "bg-[#2DBDA8]/20"
@@ -1195,12 +1195,12 @@ export default function Home() {
                             : "hover:opacity-95 active:opacity-90 transition-opacity"
                         } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#2B6B8A" }}>
+                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#1A1A1A" }}>
                           {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                         </p>
                         <div
                           className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && !teamAWon ? "text-[#2DBDA8]" : ""}`}
-                          style={!isMatchComplete || teamAWon ? { color: "#2B6B8A" } : undefined}
+                          style={!isMatchComplete || teamAWon ? { color: "#1A1A1A" } : undefined}
                         >
                           {scoreB}
                         </div>
@@ -1216,7 +1216,7 @@ export default function Home() {
                             updateMatchScore(currentRound, match.id, { teamA: scoreA, teamB: Math.max(0, scoreB - 1) });
                           }}
                           className="absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity"
-                          style={{ backgroundColor: "#2B6B8A" }}
+                          style={{ backgroundColor: "#1E3A5F" }}
                           aria-label="Subtract 1 point"
                         >
                           −1
@@ -1243,7 +1243,7 @@ export default function Home() {
                     return (
                       <>
                         {isMatchComplete && (
-                          <p className="text-sm font-bold text-[#2B6B8A] text-center break-words py-1">
+                          <p className="text-sm font-bold text-[#1E3A5F] text-center break-words py-1">
                             🏆 {teamAWon ? teamANames : teamBNames} win! ({scoreA}-{scoreB})
                           </p>
                         )}
@@ -1273,49 +1273,45 @@ export default function Home() {
                               if (!currentMatch || !currentRoundData) return;
                               const confirmed = window.confirm("Reshuffle with available players? (Paused players are excluded.)");
                               if (!confirmed) return;
-                              const currentIds = [
-                                ...currentMatch.teamA.playerIds,
-                                ...currentMatch.teamB.playerIds,
-                              ];
-                              if (currentIds.length !== 4) return;
-                              // Only active players can be in a reshuffle; paused/removed are excluded
-                              const activeOnCourt = currentIds.filter((id) => {
-                                const p = players.find((x) => x.id === id);
-                                return p?.status === "active";
-                              });
-                              const activeSittingOut = (currentRoundData.sittingOut || []).filter((id) => {
-                                const p = players.find((x) => x.id === id);
-                                return p?.status === "active";
-                              });
-                              const pool = [...activeOnCourt];
-                              let need = 4 - pool.length;
-                              for (const id of activeSittingOut) {
-                                if (need <= 0 || pool.includes(id)) continue;
-                                pool.push(id);
-                                need--;
-                              }
+                              // Pool = all active players except those playing on other courts this round (includes mid-session joiners)
+                              const activePlayers = players.filter((p) => p.status === "active");
+                              const playingOnOtherCourts = new Set(
+                                currentRoundData.matches
+                                  .filter((m) => m.court !== selectedCourt)
+                                  .flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
+                              );
+                              const pool = activePlayers
+                                .filter((p) => !playingOnOtherCourts.has(p.id))
+                                .map((p) => p.id);
                               if (pool.length < 4) {
                                 window.alert("Not enough active players to reshuffle (need 4). Unpause players or add more.");
                                 return;
                               }
-                              const four = pool.slice(0, 4);
-                              const shuffled = [...four].sort(() => Math.random() - 0.5);
+                              const shuffled = [...pool].sort(() => Math.random() - 0.5);
+                              const four = shuffled.slice(0, 4);
                               const newMatch = {
                                 ...currentMatch,
-                                teamA: { playerIds: [shuffled[0], shuffled[1]] },
-                                teamB: { playerIds: [shuffled[2], shuffled[3]] },
+                                teamA: { playerIds: [four[0], four[1]] },
+                                teamB: { playerIds: [four[2], four[3]] },
                                 status: "upcoming" as const,
                                 score: undefined,
                               };
+                              const updatedMatches = currentRoundData.matches.map((m) =>
+                                m.court === selectedCourt ? newMatch : m
+                              );
+                              const playingThisRound = new Set(
+                                updatedMatches.flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
+                              );
+                              const newSittingOut = activePlayers.filter((p) => !playingThisRound.has(p.id)).map((p) => p.id);
                               setSchedule(
                                 schedule.map((round) =>
                                   round.roundNumber === currentRound
-                                    ? { ...round, matches: round.matches.map((m) => (m.court === selectedCourt ? newMatch : m)) }
+                                    ? { ...round, matches: updatedMatches, sittingOut: newSittingOut }
                                     : round
                                 )
                               );
                             }}
-                            className="text-sm text-[#2B6B8A]/80 hover:text-[#2B6B8A] underline touch-manipulation text-center"
+                            className="text-sm text-[#64748B] hover:text-[#1E3A5F] underline touch-manipulation text-center"
                           >
                             Reshuffle match
                           </button>
@@ -1324,13 +1320,13 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={undoLastAction}
-                            className="text-xs text-[#2B6B8A]/70 hover:text-[#2B6B8A] underline touch-manipulation"
+                            className="text-xs text-[#64748B] hover:text-[#1E3A5F] underline touch-manipulation"
                             aria-label="Undo last action"
                           >
                             Undo
                           </button>
                         )}
-                        <p className="text-xs text-[#2B6B8A]/70 text-center">
+                        <p className="text-xs text-[#64748B] text-center">
                           Total: {totalScore} / {config.pointsPerMatch} points
                         </p>
                       </>
@@ -1340,8 +1336,8 @@ export default function Home() {
 
                 {/* Sitting Out — compact */}
                 {allSittingOut.length > 0 && (
-                  <div className="px-2 py-1.5 bg-[#F8F3E6] border-t border-[#E2E8F0] shrink-0">
-                    <p className="text-xs text-[#2B6B8A]/80">
+                  <div className="px-2 py-1.5 bg-[#FFFFFF] border-t border-[#E2E8F0] shrink-0">
+                    <p className="text-xs text-[#64748B]">
                       Sitting out: {allSittingOut.map((id) => getPlayer(id)?.name).join(", ")}
                     </p>
                   </div>
@@ -1363,7 +1359,7 @@ export default function Home() {
                   className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
                     scheduleFilterCourts.size === 0
                       ? "bg-[#2DBDA8] text-white"
-                      : "bg-[#E2E8F0] text-[#2B6B8A]"
+                      : "bg-[#F1F5F9] text-[#1A1A1A]"
                   }`}
                 >
                   All
@@ -1376,7 +1372,7 @@ export default function Home() {
                     className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
                       scheduleFilterCourts.has(courtId)
                         ? "bg-[#2DBDA8] text-white"
-                        : "bg-[#E2E8F0] text-[#2B6B8A]"
+                        : "bg-[#F1F5F9] text-[#1A1A1A]"
                     }`}
                   >
                     Court {courtId}
@@ -1386,7 +1382,7 @@ export default function Home() {
             )}
 
             {schedule.length === 0 ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#2B6B8A]/80">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B]">
                 No schedule yet. Start a session from Setup.
               </div>
             ) : (
@@ -1411,7 +1407,7 @@ export default function Home() {
                           : ""
                       }`}
                     >
-                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-[#2B6B8A]">
+                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-[#1E3A5F]">
                         Round {round.roundNumber}
                         {isCurrent && <span className="text-xs font-normal text-[#2DBDA8]">(current)</span>}
                         {isPast && <span className="text-xs font-normal text-[#94A3B8]">(played)</span>}
@@ -1425,13 +1421,13 @@ export default function Home() {
                           const teamAWon = score && score.teamA > score.teamB;
                           return (
                             <div key={match.id} className="text-sm space-y-1 pl-2 border-l-2 border-[#E2E8F0]">
-                              <div className="font-medium text-[#2B6B8A]/70 text-xs">Court {courtId}</div>
+                              <div className="font-medium text-[#64748B] text-xs">Court {courtId}</div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className={isComplete && teamAWon ? "font-bold text-[#2B6B8A]" : "font-normal text-[#2B6B8A]"}>
+                                <span className={isComplete && teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}>
                                   {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                                 </span>
-                                <span className="text-[#2B6B8A]/60">vs</span>
-                                <span className={isComplete && !teamAWon ? "font-bold text-[#2B6B8A]" : "font-normal text-[#2B6B8A]"}>
+                                <span className="text-[#64748B]">vs</span>
+                                <span className={isComplete && !teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}>
                                   {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
                                 </span>
                               </div>
@@ -1441,7 +1437,7 @@ export default function Home() {
                                     <span className={teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
                                       {score.teamA}
                                     </span>
-                                    <span className="text-[#2B6B8A]/50 mx-2">-</span>
+                                    <span className="text-[#94A3B8] mx-2">-</span>
                                     <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
                                       {score.teamB}
                                     </span>
@@ -1456,7 +1452,7 @@ export default function Home() {
                         })}
                       </div>
                       {round.sittingOut.length > 0 && (
-                        <p className="text-xs text-[#2B6B8A]/70 mt-3 pt-2 border-t border-[#E2E8F0]">
+                        <p className="text-xs text-[#64748B] mt-3 pt-2 border-t border-[#E2E8F0]">
                           Sit out: {round.sittingOut.map((id) => getPlayer(id)?.name).join(", ")}
                         </p>
                       )}
@@ -1473,13 +1469,13 @@ export default function Home() {
           <div className="space-y-4">
             {!leaderboardSorted.some((p) => (p.gamesPlayed ?? 0) > 0) ? (
               <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 text-center">
-                <p className="text-[#2B6B8A]/80">No matches played yet. Start a session to see rankings.</p>
+                <p className="text-[#64748B]">No matches played yet. Start a session to see rankings.</p>
               </div>
             ) : (
               <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white">
                 <table className="w-full text-left table-fixed">
                   <thead>
-                    <tr className="bg-[#E2E8F0]/40 text-[#2B6B8A]/80 text-xs uppercase tracking-wider">
+                    <tr className="bg-[#E2E8F0]/40 text-[#64748B] text-xs uppercase tracking-wider">
                       <th className="py-3 pl-4 font-semibold w-[40%]">Name</th>
                       <th className="py-3 font-semibold text-center w-[20%]">Matches Played</th>
                       <th className="py-3 font-semibold text-right pr-2 w-[15%]">PTS</th>
@@ -1495,13 +1491,13 @@ export default function Home() {
                       return (
                         <tr
                           key={p.id}
-                          className={`border-t border-[#E2E8F0] ${hasPlayed && i < 3 ? "bg-[#E8F6F3]/50" : ""}`}
+                          className={`border-t border-[#E2E8F0] ${hasPlayed && i < 3 ? "bg-[#F1F5F9]" : ""}`}
                         >
-                          <td className="py-3 pl-4 font-medium text-[#2B6B8A] truncate">
+                          <td className="py-3 pl-4 font-medium text-[#1E3A5F] truncate">
                             {medal}
                             {p.name}
                           </td>
-                          <td className="py-3 text-center text-[#2B6B8A]/90">{p.gamesPlayed ?? 0}</td>
+                          <td className="py-3 text-center text-[#1A1A1A]">{p.gamesPlayed ?? 0}</td>
                           <td className="py-3 text-right pr-2 text-lg font-bold text-[#2DBDA8]">
                             {p.totalPoints ?? 0}
                           </td>
@@ -1515,7 +1511,7 @@ export default function Home() {
               </div>
             )}
             {leaderboardSorted.length > 0 && (
-              <p className="text-xs text-[#2B6B8A]/70 text-center">
+              <p className="text-xs text-[#64748B] text-center">
                 Sorted by total Americano points, then wins.
               </p>
             )}
@@ -1528,7 +1524,7 @@ export default function Home() {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className="rounded-lg bg-[#2B6B8A] text-white text-sm font-medium px-4 py-2.5 shadow-lg border border-[#2B6B8A]/80"
+            className="rounded-lg bg-[#1E3A5F] text-white text-sm font-medium px-4 py-2.5 shadow-lg border border-[#1E3A5F]/80"
           >
             {t.message}
           </div>
