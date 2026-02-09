@@ -435,10 +435,10 @@ export default function Home() {
           <div className="space-y-6">
             {/* Session Status Banner */}
             {sessionActive && (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-semibold text-[#1E3A5F]">Session Active</p>
+                    <p className="text-base font-semibold text-[#1E3A5F]">Session Active</p>
                     <p className="text-xs text-[#64748B] mt-1">
                       Round {currentRound} of {config.rounds}
                     </p>
@@ -455,8 +455,8 @@ export default function Home() {
             )}
 
             {/* Courts: always editable on Setup, including mid-session */}
-            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
-              <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Courts</h2>
+            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+              <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Courts</h2>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -540,8 +540,8 @@ export default function Home() {
             {/* When no session: 3 hero inputs (Courts above) + Duration + Match length, then small rounds line */}
             {!sessionActive && (
               <>
-                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4">
-                  <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Duration / Match length</h2>
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                  <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Duration / Match length</h2>
                   <div>
                     <p className="text-xs text-[#64748B] mb-1.5">Duration</p>
                     <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
@@ -550,10 +550,10 @@ export default function Home() {
                           key={mins}
                           type="button"
                           onClick={() => setSessionDuration(mins)}
-                          className={`shrink-0 rounded-xl px-4 py-3 text-sm font-medium transition touch-manipulation ${
+                          className={`shrink-0 rounded-xl px-4 py-3 text-sm font-semibold transition-all touch-manipulation ${
                             sessionDuration === mins
-                              ? "bg-[#2DBDA8] text-white"
-                              : "bg-[#F1F5F9] text-[#1A1A1A] hover:bg-[#E2E8F0]"
+                              ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                              : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40"
                           }`}
                         >
                           {mins} min
@@ -566,7 +566,7 @@ export default function Home() {
                           setDurationOptions((prev) => [...prev, next]);
                           setSessionDuration(next);
                         }}
-                        className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-[#F1F5F9] text-[#1A1A1A] hover:bg-[#E2E8F0] transition touch-manipulation"
+                        className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40 transition touch-manipulation"
                         aria-label="Add 60 minutes"
                       >
                         +
@@ -582,10 +582,10 @@ export default function Home() {
                           key={pts}
                           type="button"
                           onClick={() => setConfig({ pointsPerMatch: pts })}
-                          className={`rounded-full px-4 py-2.5 text-sm font-medium transition touch-manipulation ${
+                          className={`rounded-full px-4 py-2.5 text-sm font-semibold transition-all touch-manipulation ${
                             config.pointsPerMatch === pts
-                              ? "bg-[#2DBDA8] text-white"
-                              : "bg-[#F1F5F9] text-[#1A1A1A] hover:bg-[#E2E8F0]"
+                              ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                              : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40"
                           }`}
                         >
                           {pts} pts
@@ -595,47 +595,11 @@ export default function Home() {
                   </div>
                 </section>
 
-                {/* Rounds: same card height as Courts; recommendation in small teal */}
-                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3">
-                  <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
-                      disabled={config.rounds === 1}
-                      className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#1E3A5F] text-xl font-bold touch-manipulation"
-                      aria-label="Decrease rounds"
-                    >
-                      −
-                    </button>
-                    <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
-                      {config.rounds}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setConfig({ rounds: config.rounds + 1 })}
-                      className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
-                      aria-label="Increase rounds"
-                    >
-                      +
-                    </button>
-                  </div>
-                  {activePlayers.length >= 4 && (
-                    <button
-                      type="button"
-                      onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
-                      className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
-                    >
-                      Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
-                    </button>
-                  )}
-                </section>
-
-                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                   <button
                     type="button"
                     onClick={() => setAlgorithmExpanded((e) => !e)}
-                    className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-[#F1F5F9] hover:bg-[#E2E8F0] border border-[#E2E8F0] touch-manipulation"
+                    className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-white hover:bg-[#F8FAFC] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30 touch-manipulation"
                     aria-expanded={algorithmExpanded}
                   >
                     <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
@@ -702,57 +666,9 @@ export default function Home() {
               </>
               )}
 
-            {/* When session active: Courts (above) + Rounds same height + Players only */}
-            {sessionActive && (
-              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3">
-                <h2 className="text-sm font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newRounds = Math.max(currentRound, config.rounds - 1);
-                      setConfig({ rounds: newRounds });
-                    }}
-                    disabled={config.rounds <= currentRound}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
-                    aria-label="Decrease rounds"
-                  >
-                    −
-                  </button>
-                  <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
-                    {config.rounds}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRoundsWithSchedule(config.rounds + 1)}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
-                    aria-label="Increase rounds"
-                  >
-                    +
-                  </button>
-                </div>
-                <p className="text-xs text-[#64748B] text-center">
-                  {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining
-                </p>
-                {activePlayers.length >= 4 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const recommended = balancedRoundParams.balancedRounds;
-                      const newRounds = Math.max(currentRound, recommended);
-                      setRoundsWithSchedule(newRounds);
-                    }}
-                    className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
-                  >
-                    Recommended: {balancedRoundParams.balancedRounds} (balanced play)
-                  </button>
-                )}
-              </section>
-            )}
-
-            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4">
+            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-[#1A1A1A]">Players</h2>
+                <h2 className="text-lg font-semibold text-[#1A1A1A]">Players</h2>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-semibold ${activePlayers.length >= config.courts * 4 ? "text-[#2DBDA8]" : "text-[#64748B]"}`}>
                     {activePlayers.length}
@@ -770,8 +686,8 @@ export default function Home() {
                 const regularsNotInRoster = savedRoster.filter((sp) => !currentIds.has(sp.id));
                 if (regularsNotInRoster.length === 0) return null;
                 return (
-                  <div className="mb-4 rounded-xl bg-[#F1F5F9] border border-[#E2E8F0] p-3">
-                    <h3 className="text-xs font-semibold text-[#1E3A5F] mb-2">Your regulars</h3>
+                  <div className="mb-4 rounded-2xl bg-white border-2 border-[#E2E8F0] p-3 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                    <h3 className="text-sm font-semibold text-[#1A1A1A] mb-2">Your regulars</h3>
                     <div className="flex flex-wrap gap-2">
                       {regularsNotInRoster.map((sp) => (
                         <label
@@ -865,8 +781,8 @@ export default function Home() {
                   return (
                     <li
                       key={p.id}
-                      className={`flex flex-col rounded-lg border transition-all min-h-[44px] ${
-                        isPaused ? "bg-[#E2E8F0]/40 opacity-80 border-[#E2E8F0]" : "bg-white border-[#E2E8F0]"
+                      className={`flex flex-col rounded-xl border transition-all min-h-[48px] shadow-[0_1px_4px_rgba(0,0,0,0.05)] ${
+                        isPaused ? "bg-[#E2E8F0]/40 opacity-80 border-[#E2E8F0]" : "bg-white border-[#E2E8F0] border-l-4 border-l-[#2DBDA8]"
                       } ${isEditing ? "ring-2 ring-[#2DBDA8] bg-white p-2" : "px-3 py-2"}`}
                     >
                       {isEditing ? (
@@ -1012,15 +928,101 @@ export default function Home() {
               )}
             </section>
 
+            {/* Rounds: after players — pre-session */}
+            {!sessionActive && (
+              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
+                    disabled={config.rounds === 1}
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#1E3A5F] text-xl font-bold touch-manipulation"
+                    aria-label="Decrease rounds"
+                  >
+                    −
+                  </button>
+                  <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
+                    {config.rounds}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfig({ rounds: config.rounds + 1 })}
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
+                    aria-label="Increase rounds"
+                  >
+                    +
+                  </button>
+                </div>
+                {activePlayers.length >= 4 && (
+                  <button
+                    type="button"
+                    onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
+                    className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
+                  >
+                    Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
+                  </button>
+                )}
+              </section>
+            )}
+
+            {/* Rounds: after players — during session */}
+            {sessionActive && (
+              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const newRounds = Math.max(currentRound, config.rounds - 1);
+                      setConfig({ rounds: newRounds });
+                    }}
+                    disabled={config.rounds <= currentRound}
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
+                    aria-label="Decrease rounds"
+                  >
+                    −
+                  </button>
+                  <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
+                    {config.rounds}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setRoundsWithSchedule(config.rounds + 1)}
+                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
+                    aria-label="Increase rounds"
+                  >
+                    +
+                  </button>
+                </div>
+                <p className="text-xs text-[#64748B] text-center">
+                  {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining
+                </p>
+                {activePlayers.length >= 4 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const recommended = balancedRoundParams.balancedRounds;
+                      const newRounds = Math.max(currentRound, recommended);
+                      setRoundsWithSchedule(newRounds);
+                    }}
+                    className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
+                  >
+                    Recommended: {balancedRoundParams.balancedRounds} (balanced play)
+                  </button>
+                )}
+              </section>
+            )}
+
             {!sessionActive && (
               <>
                 <button
                   type="button"
                   onClick={startSession}
                   disabled={!canStartSession}
-                  className={`w-full rounded-xl py-4 sm:py-4 font-semibold touch-manipulation min-h-[52px] transition-all ${
+                  className={`w-full rounded-2xl py-5 text-lg font-bold touch-manipulation min-h-[56px] transition-all ${
                     canStartSession
-                      ? "bg-[#2DBDA8] text-white hover:bg-[#238F7E] active:bg-[#238F7E]"
+                      ? "bg-[#2DBDA8] text-white hover:bg-[#238F7E] active:bg-[#238F7E] shadow-[0_4px_14px_rgba(45,189,168,0.45)] hover:shadow-[0_6px_20px_rgba(45,189,168,0.5)]"
                       : "bg-[#B0BEC5] text-[#64748B] cursor-not-allowed opacity-60"
                   }`}
                 >
@@ -1040,11 +1042,11 @@ export default function Home() {
         {screen === "session" && (
           <div className={`min-w-0 overflow-x-hidden w-full max-w-[100vw] ${sessionActive && currentMatch ? "flex flex-col h-[calc(100vh-7rem)]" : ""}`}>
             {!sessionActive ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                 No active session. Start a session from Setup.
               </div>
             ) : !currentMatch ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                 No match found for Court {selectedCourt} in Round {currentRound}.
               </div>
             ) : (
@@ -1086,10 +1088,10 @@ export default function Home() {
                             key={courtId}
                             type="button"
                             onClick={() => setSelectedCourt(courtId)}
-                            className={`rounded-full px-4 py-2 text-sm font-semibold transition-all touch-manipulation min-h-[44px] shrink-0 ${
+                            className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition-all touch-manipulation min-h-[44px] shrink-0 ${
                               isSelected
-                                ? "bg-[#2DBDA8] text-white shadow-md"
-                                : "bg-[#F1F5F9] text-[#1A1A1A] border-2 border-[#E2E8F0]"
+                                ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                                : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30"
                             }`}
                           >
                             Court {courtId}
@@ -1263,7 +1265,7 @@ export default function Home() {
                               }
                             }}
                             disabled={!canConfirm}
-                            className="w-full rounded-xl bg-[#2DBDA8] py-3 text-sm font-semibold text-white hover:bg-[#238F7E] active:bg-[#238F7E] disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[48px] whitespace-nowrap"
+                            className="w-full rounded-xl bg-[#2DBDA8] py-3.5 text-base font-bold text-white hover:bg-[#238F7E] active:bg-[#238F7E] disabled:opacity-50 disabled:cursor-not-allowed touch-manipulation min-h-[52px] whitespace-nowrap shadow-[0_2px_8px_rgba(45,189,168,0.35)]"
                           >
                             {isMatchComplete ? "Log match" : "Confirm"}
                           </button>
@@ -1356,10 +1358,10 @@ export default function Home() {
                 <button
                   type="button"
                   onClick={() => setScheduleFilterCourts(new Set())}
-                  className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
+                  className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition-all touch-manipulation min-h-[44px] ${
                     scheduleFilterCourts.size === 0
-                      ? "bg-[#2DBDA8] text-white"
-                      : "bg-[#F1F5F9] text-[#1A1A1A]"
+                      ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                      : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30"
                   }`}
                 >
                   All
@@ -1369,10 +1371,10 @@ export default function Home() {
                     key={courtId}
                     type="button"
                     onClick={() => setScheduleFilterCourts(new Set([courtId]))}
-                    className={`rounded-full px-4 py-2 sm:py-1.5 text-sm font-medium transition touch-manipulation min-h-[44px] sm:min-h-0 ${
+                    className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition-all touch-manipulation min-h-[44px] ${
                       scheduleFilterCourts.has(courtId)
-                        ? "bg-[#2DBDA8] text-white"
-                        : "bg-[#F1F5F9] text-[#1A1A1A]"
+                        ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                        : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30"
                     }`}
                   >
                     Court {courtId}
@@ -1382,7 +1384,7 @@ export default function Home() {
             )}
 
             {schedule.length === 0 ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                 No schedule yet. Start a session from Setup.
               </div>
             ) : (
@@ -1399,7 +1401,7 @@ export default function Home() {
                   return (
                     <section
                       key={round.roundNumber}
-                      className={`rounded-2xl border border-[#E2E8F0] bg-white p-4 ${
+                      className={`rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)] ${
                         isCurrent
                           ? "border-l-4 border-l-[#2DBDA8]"
                           : isFuture
@@ -1423,12 +1425,18 @@ export default function Home() {
                             <div key={match.id} className="text-sm space-y-1 pl-2 border-l-2 border-[#E2E8F0]">
                               <div className="font-medium text-[#64748B] text-xs">Court {courtId}</div>
                               <div className="flex flex-wrap items-center gap-2">
-                                <span className={isComplete && teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}>
+                                <span className={`flex items-center gap-1.5 ${isComplete && teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}`}>
                                   {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                  {isComplete && teamAWon && (
+                                    <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
+                                  )}
                                 </span>
                                 <span className="text-[#64748B]">vs</span>
-                                <span className={isComplete && !teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}>
+                                <span className={`flex items-center gap-1.5 ${isComplete && !teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}`}>
                                   {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                  {isComplete && !teamAWon && (
+                                    <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
+                                  )}
                                 </span>
                               </div>
                               {score && (
@@ -1440,9 +1448,6 @@ export default function Home() {
                                     <span className="text-[#94A3B8] mx-2">-</span>
                                     <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
                                       {score.teamB}
-                                    </span>
-                                    <span className="text-[#94A3B8] ml-2 text-sm font-normal">
-                                      ({teamAWon ? "Team A wins" : "Team B wins"})
                                     </span>
                                   </p>
                                 </div>
@@ -1468,11 +1473,11 @@ export default function Home() {
         {screen === "leaderboard" && (
           <div className="space-y-4">
             {!leaderboardSorted.some((p) => (p.gamesPlayed ?? 0) > 0) ? (
-              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 text-center">
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 text-center shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                 <p className="text-[#64748B]">No matches played yet. Start a session to see rankings.</p>
               </div>
             ) : (
-              <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white">
+              <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                 <table className="w-full text-left table-fixed">
                   <thead>
                     <tr className="bg-[#E2E8F0]/40 text-[#64748B] text-xs uppercase tracking-wider">
