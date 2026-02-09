@@ -469,7 +469,7 @@ export default function Home() {
             )}
 
             {/* Courts: always editable on Setup, including mid-session */}
-            <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+            <section className={`rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)] ${!sessionActive ? 'mt-4' : ''}`}>
               <h2 className="text-base font-semibold text-[#1A1A1A] mb-2">Courts</h2>
               <div className="flex items-center gap-2">
                 <button
@@ -587,7 +587,7 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div>
+                <div className="mt-4">
                   <p className="text-xs text-[#2DBDA8] mb-2">Match length</p>
                   <div className="flex gap-2 flex-wrap mb-3">
                     {[16, 21, 32].map((pts) => (
@@ -607,8 +607,78 @@ export default function Home() {
                   </div>
                 </div>
 
+                {/* Matching logic */}
+                <div className="border-t border-[#E2E8F0] pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setAlgorithmExpanded((e) => !e)}
+                    className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-white hover:bg-[#F8FAFC] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30 touch-manipulation"
+                    aria-expanded={algorithmExpanded}
+                  >
+                    <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
+                  </button>
+                  {algorithmExpanded && (
+                    <div className="flex flex-col gap-2 mt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfig({ algorithm: "balanced" });
+                          if (sessionActive) {
+                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
+                            setSchedule(newSchedule);
+                          }
+                        }}
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                          config.algorithm === "balanced"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                        }`}
+                      >
+                        <div className="font-semibold">Balanced</div>
+                        <p className="text-xs text-[#64748B]">Balance skill levels across teams for fair matchups.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfig({ algorithm: "random" });
+                          if (sessionActive) {
+                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
+                            setSchedule(newSchedule);
+                          }
+                        }}
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                          config.algorithm === "random"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                        }`}
+                      >
+                        <div className="font-semibold">Random</div>
+                        <p className="text-xs text-[#64748B]">Fully randomized matchups, ignoring skill ratings.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setConfig({ algorithm: "king" });
+                          if (sessionActive) {
+                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
+                            setSchedule(newSchedule);
+                          }
+                        }}
+                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                          config.algorithm === "king"
+                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                        }`}
+                      >
+                        <div className="font-semibold">King of the Court</div>
+                        <p className="text-xs text-[#64748B]">Winning team stays on court; losing team rotates off.</p>
+                      </button>
+                    </div>
+                  )}
+                </div>
+
                 {/* Rounds summary + collapsible Adjust (during session) */}
-                <div className="pt-2 border-t border-[#E2E8F0]">
+                <div className="border-t border-[#E2E8F0] pt-2">
                   <p className="text-sm font-normal text-[#1A1A1A] flex flex-wrap items-center gap-1.5 mb-3">
                     <span>📋 {config.rounds} rounds · {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining</span>
                     <button
@@ -722,12 +792,82 @@ export default function Home() {
                     </div>
                   </div>
 
+                  {/* Matching logic */}
+                  <div className="border-t border-[#E2E8F0] pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setAlgorithmExpanded((e) => !e)}
+                      className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-white hover:bg-[#F8FAFC] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30 touch-manipulation"
+                      aria-expanded={algorithmExpanded}
+                    >
+                      <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
+                    </button>
+                    {algorithmExpanded && (
+                      <div className="flex flex-col gap-2 mt-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfig({ algorithm: "balanced" });
+                            if (sessionActive) {
+                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
+                              setSchedule(newSchedule);
+                            }
+                          }}
+                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                            config.algorithm === "balanced"
+                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                          }`}
+                        >
+                          <div className="font-semibold">Balanced</div>
+                          <p className="text-xs text-[#64748B]">Balance skill levels across teams for fair matchups.</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfig({ algorithm: "random" });
+                            if (sessionActive) {
+                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
+                              setSchedule(newSchedule);
+                            }
+                          }}
+                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                            config.algorithm === "random"
+                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                          }`}
+                        >
+                          <div className="font-semibold">Random</div>
+                          <p className="text-xs text-[#64748B]">Fully randomized matchups, ignoring skill ratings.</p>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setConfig({ algorithm: "king" });
+                            if (sessionActive) {
+                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
+                              setSchedule(newSchedule);
+                            }
+                          }}
+                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                            config.algorithm === "king"
+                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                          }`}
+                        >
+                          <div className="font-semibold">King of the Court</div>
+                          <p className="text-xs text-[#64748B]">Winning team stays on court; losing team rotates off.</p>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Rounds summary + collapsible Adjust (pre-session) */}
                   {(() => {
                     const N = Math.max(4, activePlayers.length);
                     const matchesPerPlayer = N > 0 ? Math.floor((4 * config.rounds * config.courts) / N) : 0;
                     return (
-                      <div className="pt-2 border-t border-[#E2E8F0]">
+                      <div className="border-t border-[#E2E8F0] pt-2">
                         <p className="text-sm font-normal text-[#1A1A1A] flex flex-wrap items-center gap-1.5 mb-3">
                           <span>📋 {config.rounds} rounds · everyone plays {matchesPerPlayer} matches</span>
                           <button
@@ -774,75 +914,6 @@ export default function Home() {
                       </div>
                     );
                   })()}
-                </section>
-
-                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-                  <button
-                    type="button"
-                    onClick={() => setAlgorithmExpanded((e) => !e)}
-                    className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-white hover:bg-[#F8FAFC] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30 touch-manipulation"
-                    aria-expanded={algorithmExpanded}
-                  >
-                    <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
-                  </button>
-                  {algorithmExpanded && (
-                    <div className="flex flex-col gap-2 mt-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfig({ algorithm: "balanced" });
-                          if (sessionActive) {
-                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
-                            setSchedule(newSchedule);
-                          }
-                        }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                          config.algorithm === "balanced"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                        }`}
-                      >
-                        <div className="font-semibold">Balanced</div>
-                        <p className="text-xs text-[#64748B]">Balance skill levels across teams for fair matchups.</p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfig({ algorithm: "random" });
-                          if (sessionActive) {
-                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
-                            setSchedule(newSchedule);
-                          }
-                        }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                          config.algorithm === "random"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                        }`}
-                      >
-                        <div className="font-semibold">Random</div>
-                        <p className="text-xs text-[#64748B]">Fully randomized matchups, ignoring skill ratings.</p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfig({ algorithm: "king" });
-                          if (sessionActive) {
-                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
-                            setSchedule(newSchedule);
-                          }
-                        }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                          config.algorithm === "king"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                        }`}
-                      >
-                        <div className="font-semibold">King of the Court</div>
-                        <p className="text-xs text-[#64748B]">Winning team stays on court; losing team rotates off.</p>
-                      </button>
-                    </div>
-                  )}
                 </section>
               </>
               )}
@@ -1137,11 +1208,11 @@ export default function Home() {
         {screen === "session" && (
           <div className={`min-w-0 overflow-x-hidden w-full max-w-[100vw] ${sessionActive && currentMatch ? "flex flex-col h-[calc(100vh-7rem)]" : ""}`}>
             {!sessionActive ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)] mt-4">
                 No active session. Start a session from Setup.
               </div>
             ) : !currentMatch ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)] mt-4">
                 No match found for Court {selectedCourt} in Round {currentRound}.
               </div>
             ) : (
@@ -1440,7 +1511,7 @@ export default function Home() {
           <div className="space-y-4">
             {/* Filter chips */}
             {config.courts > 1 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 mt-4">
                 <button
                   type="button"
                   onClick={() => setScheduleFilterCourts(new Set())}
@@ -1470,11 +1541,11 @@ export default function Home() {
             )}
 
             {schedule.length === 0 ? (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-6 text-center text-[#64748B] shadow-[0_2px_8px_rgba(0,0,0,0.06)] mt-4">
                 No schedule yet. Start a session from Setup.
               </div>
             ) : (
-              <div className="space-y-4">
+              <div className={`space-y-4 ${config.courts === 1 ? 'mt-4' : ''}`}>
                 {(() => {
                   const futureRounds = schedule.filter((r) => r.roundNumber > currentRound);
                   const showFirstFutureCount = 3;
@@ -1600,12 +1671,12 @@ export default function Home() {
         {screen === "leaderboard" && (
           <div className="space-y-4">
             {!leaderboardSorted.some((p) => (p.gamesPlayed ?? 0) > 0) ? (
-              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 text-center shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+              <div className="rounded-2xl border border-[#E2E8F0] bg-white p-8 text-center shadow-[0_2px_8px_rgba(0,0,0,0.06)] mt-4">
                 <p className="text-[#64748B]">No matches played yet. Start a session to see rankings.</p>
               </div>
             ) : (
               <>
-                <h2 className="text-lg font-bold text-[#1E3A5F]">
+                <h2 className="text-lg font-bold text-[#1E3A5F] mt-4">
                   🏆 Session Results · {sessionDateStr}
                 </h2>
                 <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
