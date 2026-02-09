@@ -49,7 +49,7 @@ function AppHeader({
   return (
     <header className="sticky top-0 z-30 bg-white border-b border-[#E2E8F0] px-3 sm:px-4 pb-3">
       <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-[#2DBDA8] pt-4 sm:pt-6 pb-3">
-        gaspadel
+        <img src="/logo.svg" alt="gaspadel" className="h-6 sm:h-8" />
       </h1>
       <nav className="flex gap-1 rounded-xl bg-[#F1F5F9] p-1.5 overflow-x-auto">
         {tabs.map(({ id, label }) => (
@@ -105,12 +105,14 @@ export default function Home() {
   const [editingPlayerSkill, setEditingPlayerSkill] = useState<1 | 2 | 3 | 4 | 5>(3);
   const [selectedCourt, setSelectedCourt] = useState<number>(1);
   const [scheduleFilterCourts, setScheduleFilterCourts] = useState<Set<number>>(new Set());
+  const [scheduleFutureExpanded, setScheduleFutureExpanded] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [regularsSelected, setRegularsSelected] = useState<Set<string>>(new Set());
   const [toasts, setToasts] = useState<{ id: string; message: string }[]>([]);
   const [sessionDuration, setSessionDuration] = useState<number>(60);
   const [durationOptions, setDurationOptions] = useState<number[]>([60, 120, 180]);
   const [algorithmExpanded, setAlgorithmExpanded] = useState(false);
+  const [roundsAdjustExpanded, setRoundsAdjustExpanded] = useState(false);
 
   const addToast = useCallback((message: string) => {
     const id = Math.random().toString(36).slice(2, 9);
@@ -311,6 +313,11 @@ export default function Home() {
       });
   }, [players]);
 
+  const sessionDateStr = useMemo(
+    () => new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+    []
+  );
+
   const canStartSession = activePlayers.length >= config.courts * 4;
 
   // Get all players currently playing across all courts in current round
@@ -355,6 +362,13 @@ export default function Home() {
     const matchesPerPlayer = N > 0 ? Math.floor((4 * balancedRounds * C) / N) : 0;
     return { balancedRounds, step, matchesPerPlayer };
   }, [activePlayers.length, config.courts, sessionDuration, matchDurationMinutes]);
+
+  // Auto-calculate rounds when not in session (recalcs when courts, duration, match length, or player count change)
+  useEffect(() => {
+    if (!sessionActive) {
+      setConfig({ rounds: balancedRoundParams.balancedRounds });
+    }
+  }, [sessionActive, balancedRoundParams.balancedRounds, setConfig]);
 
   const effectivePoints = config.pointsPerMatch;
 
@@ -537,6 +551,64 @@ export default function Home() {
               )}
             </section>
 
+            {/* Rounds summary + collapsible Adjust (during session) */}
+            {sessionActive && (
+              <div className="px-1">
+                <p className="text-sm text-[#1A1A1A] flex flex-wrap items-center gap-1.5">
+                  <span>📋 {config.rounds} rounds · {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining</span>
+                  <button
+                    type="button"
+                    onClick={() => setRoundsAdjustExpanded((e) => !e)}
+                    className="text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                  >
+                    Adjust
+                  </button>
+                </p>
+                {roundsAdjustExpanded && (
+                  <div className="mt-3 flex flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const newRounds = Math.max(currentRound, config.rounds - 1);
+                          setConfig({ rounds: newRounds });
+                        }}
+                        disabled={config.rounds <= currentRound}
+                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
+                        aria-label="Decrease rounds"
+                      >
+                        −
+                      </button>
+                      <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
+                        {config.rounds}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setRoundsWithSchedule(config.rounds + 1)}
+                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
+                        aria-label="Increase rounds"
+                      >
+                        +
+                      </button>
+                    </div>
+                    {activePlayers.length >= 4 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const recommended = balancedRoundParams.balancedRounds;
+                          const newRounds = Math.max(currentRound, recommended);
+                          setRoundsWithSchedule(newRounds);
+                        }}
+                        className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                      >
+                        Recommended: {balancedRoundParams.balancedRounds} (balanced play)
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* When no session: 3 hero inputs (Courts above) + Duration + Match length, then small rounds line */}
             {!sessionActive && (
               <>
@@ -594,6 +666,59 @@ export default function Home() {
                     </div>
                   </div>
                 </section>
+
+                {/* Rounds summary + collapsible Adjust (pre-session) */}
+                {(() => {
+                  const N = Math.max(4, activePlayers.length);
+                  const matchesPerPlayer = N > 0 ? Math.floor((4 * config.rounds * config.courts) / N) : 0;
+                  return (
+                    <div className="px-1">
+                      <p className="text-sm text-[#1A1A1A] flex flex-wrap items-center gap-1.5">
+                        <span>📋 {config.rounds} rounds · everyone plays {matchesPerPlayer} matches</span>
+                        <button
+                          type="button"
+                          onClick={() => setRoundsAdjustExpanded((e) => !e)}
+                          className="text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                        >
+                          Adjust
+                        </button>
+                      </p>
+                      {roundsAdjustExpanded && (
+                        <div className="mt-3 flex flex-col gap-2">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
+                              disabled={config.rounds === 1}
+                              className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#1E3A5F] text-xl font-bold touch-manipulation"
+                              aria-label="Decrease rounds"
+                            >
+                              −
+                            </button>
+                            <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
+                              {config.rounds}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setConfig({ rounds: config.rounds + 1 })}
+                              className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
+                              aria-label="Increase rounds"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
+                            className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                          >
+                            Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                   <button
@@ -928,92 +1053,6 @@ export default function Home() {
               )}
             </section>
 
-            {/* Rounds: after players — pre-session */}
-            {!sessionActive && (
-              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-                <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
-                    disabled={config.rounds === 1}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#1E3A5F] text-xl font-bold touch-manipulation"
-                    aria-label="Decrease rounds"
-                  >
-                    −
-                  </button>
-                  <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
-                    {config.rounds}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setConfig({ rounds: config.rounds + 1 })}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
-                    aria-label="Increase rounds"
-                  >
-                    +
-                  </button>
-                </div>
-                {activePlayers.length >= 4 && (
-                  <button
-                    type="button"
-                    onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
-                    className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
-                  >
-                    Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
-                  </button>
-                )}
-              </section>
-            )}
-
-            {/* Rounds: after players — during session */}
-            {sessionActive && (
-              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-3 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-                <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Rounds</h2>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const newRounds = Math.max(currentRound, config.rounds - 1);
-                      setConfig({ rounds: newRounds });
-                    }}
-                    disabled={config.rounds <= currentRound}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
-                    aria-label="Decrease rounds"
-                  >
-                    −
-                  </button>
-                  <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
-                    {config.rounds}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setRoundsWithSchedule(config.rounds + 1)}
-                    className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
-                    aria-label="Increase rounds"
-                  >
-                    +
-                  </button>
-                </div>
-                <p className="text-xs text-[#64748B] text-center">
-                  {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining
-                </p>
-                {activePlayers.length >= 4 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const recommended = balancedRoundParams.balancedRounds;
-                      const newRounds = Math.max(currentRound, recommended);
-                      setRoundsWithSchedule(newRounds);
-                    }}
-                    className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation mt-1"
-                  >
-                    Recommended: {balancedRoundParams.balancedRounds} (balanced play)
-                  </button>
-                )}
-              </section>
-            )}
-
             {!sessionActive && (
               <>
                 <button
@@ -1052,15 +1091,6 @@ export default function Home() {
             ) : (
               <>
                 {/* Add more rounds — tight under tab bar, no gap */}
-                {hasTimeLeftRecommendation && currentRound >= config.rounds && (
-                  <button
-                    type="button"
-                    onClick={() => setScreen("setup")}
-                    className="w-full text-left px-3 py-2 bg-[#F1F5F9] border-b border-[#E2E8F0] text-[#1E3A5F] text-sm font-medium hover:bg-[#E2E8F0] active:bg-[#2DBDA8]/20 touch-manipulation shrink-0"
-                  >
-                    Add more rounds — tap Setup
-                  </button>
-                )}
                 {/* Court header + progress — 8px padding, directly above score zones */}
                 <div className="bg-[#FFFFFF] border-b border-[#E2E8F0] px-2 py-2 shrink-0">
                   <h2 className="text-base font-bold text-[#1E3A5F]">
@@ -1389,81 +1419,122 @@ export default function Home() {
               </div>
             ) : (
               <div className="space-y-4">
-                {schedule.map((round) => {
-                  const isCurrent = round.roundNumber === currentRound;
-                  const isPast = round.roundNumber < currentRound;
-                  const isFuture = round.roundNumber > currentRound;
-                  const matchesByCourt = new Map(round.matches.map((m) => [m.court, m]));
-                  const courtsToShow = scheduleFilterCourts.size === 0
-                    ? Array.from({ length: config.courts }, (_, i) => i + 1)
-                    : Array.from({ length: config.courts }, (_, i) => i + 1).filter((c) => scheduleFilterCourts.has(c));
-
+                {(() => {
+                  const futureRounds = schedule.filter((r) => r.roundNumber > currentRound);
+                  const showFirstFutureCount = 3;
+                  const hiddenFutureCount = futureRounds.length > showFirstFutureCount && !scheduleFutureExpanded
+                    ? futureRounds.length - showFirstFutureCount
+                    : 0;
+                  const roundsToShow = scheduleFutureExpanded || hiddenFutureCount === 0
+                    ? schedule
+                    : [
+                        ...schedule.filter((r) => r.roundNumber <= currentRound),
+                        ...futureRounds.slice(0, showFirstFutureCount),
+                      ];
                   return (
-                    <section
-                      key={round.roundNumber}
-                      className={`rounded-2xl border border-[#E2E8F0] bg-white p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)] ${
-                        isCurrent
-                          ? "border-l-4 border-l-[#2DBDA8]"
-                          : isFuture
-                          ? "opacity-75"
-                          : ""
-                      }`}
-                    >
-                      <h3 className="text-sm font-semibold mb-3 flex items-center gap-2 text-[#1E3A5F]">
-                        Round {round.roundNumber}
-                        {isCurrent && <span className="text-xs font-normal text-[#2DBDA8]">(current)</span>}
-                        {isPast && <span className="text-xs font-normal text-[#94A3B8]">(played)</span>}
-                      </h3>
-                      <div className="space-y-3">
-                        {courtsToShow.map((courtId) => {
-                          const match = matchesByCourt.get(courtId);
-                          if (!match) return null;
-                          const score = match.score;
-                          const isComplete = match.status === "completed";
-                          const teamAWon = score && score.teamA > score.teamB;
-                          return (
-                            <div key={match.id} className="text-sm space-y-1 pl-2 border-l-2 border-[#E2E8F0]">
-                              <div className="font-medium text-[#64748B] text-xs">Court {courtId}</div>
-                              <div className="flex flex-wrap items-center gap-2">
-                                <span className={`flex items-center gap-1.5 ${isComplete && teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}`}>
-                                  {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
-                                  {isComplete && teamAWon && (
-                                    <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
-                                  )}
-                                </span>
-                                <span className="text-[#64748B]">vs</span>
-                                <span className={`flex items-center gap-1.5 ${isComplete && !teamAWon ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1E3A5F]"}`}>
-                                  {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
-                                  {isComplete && !teamAWon && (
-                                    <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
-                                  )}
-                                </span>
-                              </div>
-                              {score && (
-                                <div className="pt-1">
-                                  <p className="text-base font-semibold">
-                                    <span className={teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
-                                      {score.teamA}
-                                    </span>
-                                    <span className="text-[#94A3B8] mx-2">-</span>
-                                    <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
-                                      {score.teamB}
-                                    </span>
-                                  </p>
-                                </div>
+                    <>
+                      {roundsToShow.map((round) => {
+                        const isCurrent = round.roundNumber === currentRound;
+                        const isPast = round.roundNumber < currentRound;
+                        const isFuture = round.roundNumber > currentRound;
+                        const matchesByCourt = new Map(round.matches.map((m) => [m.court, m]));
+                        const courtsToShow = scheduleFilterCourts.size === 0
+                          ? Array.from({ length: config.courts }, (_, i) => i + 1)
+                          : Array.from({ length: config.courts }, (_, i) => i + 1).filter((c) => scheduleFilterCourts.has(c));
+
+                        const cardBg = isPast ? "bg-[#F5F5F5]" : isCurrent ? "bg-[#E6F5F1]" : "bg-white";
+                        const cardBorder = isPast
+                          ? "border border-[#E2E8F0]"
+                          : isCurrent
+                          ? "border border-[#E2E8F0] border-l-4 border-l-[#2DBDA8]"
+                          : "border border-dashed border-[#E2E8F0]";
+                        const headerColor = isPast ? "text-[#64748B]" : isCurrent ? "text-[#1E3A5F]" : "text-[#94A3B8]";
+                        const courtLabelColor = isFuture ? "text-[#94A3B8]" : "text-[#64748B]";
+                        const vsColor = isFuture ? "text-[#94A3B8]" : "text-[#64748B]";
+
+                        return (
+                          <section
+                            key={round.roundNumber}
+                            className={`rounded-2xl p-4 ${cardBg} ${cardBorder} ${isPast ? "shadow-none" : "shadow-[0_2px_8px_rgba(0,0,0,0.06)]"}`}
+                          >
+                            <h3 className={`text-sm font-semibold mb-3 flex items-center gap-2 ${headerColor}`}>
+                              Round {round.roundNumber}
+                              {isCurrent && (
+                                <>
+                                  <span className="w-2 h-2 rounded-full bg-[#2DBDA8] schedule-live-dot" aria-hidden />
+                                  <span className="text-xs font-normal text-[#2DBDA8]">(current)</span>
+                                </>
                               )}
+                              {isPast && <span className="text-xs font-normal text-[#94A3B8]">(played)</span>}
+                            </h3>
+                            <div className="space-y-3">
+                              {courtsToShow.map((courtId) => {
+                                const match = matchesByCourt.get(courtId);
+                                if (!match) return null;
+                                const score = match.score;
+                                const isComplete = match.status === "completed";
+                                const teamAWon = score && score.teamA > score.teamB;
+                                const teamClass = (winner: boolean) =>
+                                  isFuture
+                                    ? "font-normal text-[#94A3B8]"
+                                    : isPast
+                                    ? winner ? "font-bold text-[#64748B]" : "font-normal text-[#64748B]"
+                                    : winner ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1A1A1A]";
+                                return (
+                                  <div key={match.id} className={`text-sm space-y-1 pl-2 border-l-2 ${isFuture ? "border-[#E2E8F0]/60" : "border-[#E2E8F0]"}`}>
+                                    <div className={`font-medium text-xs ${courtLabelColor}`}>Court {courtId}</div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                      <span className={`flex items-center gap-1.5 ${teamClass(!!(isComplete && teamAWon))}`}>
+                                        {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                        {isComplete && teamAWon && (
+                                          <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
+                                        )}
+                                      </span>
+                                      <span className={vsColor}>vs</span>
+                                      <span className={`flex items-center gap-1.5 ${teamClass(!!(isComplete && !teamAWon))}`}>
+                                        {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                        {isComplete && !teamAWon && (
+                                          <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
+                                        )}
+                                      </span>
+                                    </div>
+                                    {score && (
+                                      <div className="pt-1">
+                                        <p className={`text-base font-semibold ${isPast ? "text-[#64748B]" : ""}`}>
+                                          <span className={teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
+                                            {score.teamA}
+                                          </span>
+                                          <span className="text-[#94A3B8] mx-2">-</span>
+                                          <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
+                                            {score.teamB}
+                                          </span>
+                                        </p>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                          );
-                        })}
-                      </div>
-                      {round.sittingOut.length > 0 && (
-                        <p className="text-xs text-[#64748B] mt-3 pt-2 border-t border-[#E2E8F0]">
-                          Sit out: {round.sittingOut.map((id) => getPlayer(id)?.name).join(", ")}
-                        </p>
+                            {round.sittingOut.length > 0 && (
+                              <p className="text-[11px] italic text-[#94A3B8] mt-3 pt-2 border-t border-[#E2E8F0]/70">
+                                Sit out: {round.sittingOut.map((id) => getPlayer(id)?.name).join(", ")}
+                              </p>
+                            )}
+                          </section>
+                        );
+                      })}
+                      {hiddenFutureCount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setScheduleFutureExpanded(true)}
+                          className="w-full text-center text-sm text-[#2DBDA8] hover:text-[#238F7E] hover:underline py-2 touch-manipulation"
+                        >
+                          {hiddenFutureCount} more round{hiddenFutureCount !== 1 ? "s" : ""}…
+                        </button>
                       )}
-                    </section>
+                    </>
                   );
-                })}
+                })()}
               </div>
             )}
           </div>
@@ -1477,45 +1548,53 @@ export default function Home() {
                 <p className="text-[#64748B]">No matches played yet. Start a session to see rankings.</p>
               </div>
             ) : (
-              <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-                <table className="w-full text-left table-fixed">
-                  <thead>
-                    <tr className="bg-[#E2E8F0]/40 text-[#64748B] text-xs uppercase tracking-wider">
-                      <th className="py-3 pl-4 font-semibold w-[40%]">Name</th>
-                      <th className="py-3 font-semibold text-center w-[20%]">Matches Played</th>
-                      <th className="py-3 font-semibold text-right pr-2 w-[15%]">PTS</th>
-                      <th className="py-3 font-semibold text-center w-[12%]">W</th>
-                      <th className="py-3 font-semibold text-center pr-4 w-[13%]">L</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {leaderboardSorted.map((p, i) => {
-                      const hasPlayed = (p.gamesPlayed ?? 0) >= 1;
-                      const medal =
-                        hasPlayed && i === 0 ? "🥇 " : hasPlayed && i === 1 ? "🥈 " : hasPlayed && i === 2 ? "🥉 " : "";
-                      return (
-                        <tr
-                          key={p.id}
-                          className={`border-t border-[#E2E8F0] ${hasPlayed && i < 3 ? "bg-[#F1F5F9]" : ""}`}
-                        >
-                          <td className="py-3 pl-4 font-medium text-[#1E3A5F] truncate">
-                            {medal}
-                            {p.name}
-                          </td>
-                          <td className="py-3 text-center text-[#1A1A1A]">{p.gamesPlayed ?? 0}</td>
-                          <td className="py-3 text-right pr-2 text-lg font-bold text-[#2DBDA8]">
-                            {p.totalPoints ?? 0}
-                          </td>
-                          <td className="py-3 text-center text-lg font-bold text-[#2DBDA8]">{p.wins ?? 0}</td>
-                          <td className="py-3 text-center pr-4 text-lg font-bold text-[#C0444E]">{p.losses ?? 0}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                <h2 className="text-lg font-bold text-[#1E3A5F]">
+                  🏆 Session Results · {sessionDateStr}
+                </h2>
+                <div className="rounded-2xl overflow-hidden border border-[#E2E8F0] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                  <table className="w-full text-left table-fixed">
+                    <thead>
+                      <tr className="bg-[#E2E8F0]/40 text-[#64748B] text-xs uppercase tracking-wider">
+                        <th className="py-3 pl-4 font-semibold w-[40%]">Name</th>
+                        <th className="py-3 font-semibold text-center w-[20%]">Matches Played</th>
+                        <th className="py-3 font-semibold text-right pr-2 w-[15%]">PTS</th>
+                        <th className="py-3 font-semibold text-center w-[12%]">W</th>
+                        <th className="py-3 font-semibold text-center pr-4 w-[13%]">L</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {leaderboardSorted.map((p, i) => {
+                        const hasPlayed = (p.gamesPlayed ?? 0) >= 1;
+                        const medal =
+                          hasPlayed && i === 0 ? "🥇 " : hasPlayed && i === 1 ? "🥈 " : hasPlayed && i === 2 ? "🥉 " : "";
+                        return (
+                          <tr
+                            key={p.id}
+                            className={`border-t border-[#E2E8F0] ${hasPlayed && i < 3 ? "bg-[#F1F5F9]" : ""}`}
+                          >
+                            <td className="py-3 pl-4 font-medium text-[#1E3A5F] truncate">
+                              {medal}
+                              {p.name}
+                            </td>
+                            <td className="py-3 text-center text-[#1A1A1A]">{p.gamesPlayed ?? 0}</td>
+                            <td className="py-3 text-right pr-2 text-lg font-bold text-[#2DBDA8]">
+                              {p.totalPoints ?? 0}
+                            </td>
+                            <td className="py-3 text-center text-lg font-bold text-[#2DBDA8]">{p.wins ?? 0}</td>
+                            <td className="py-3 text-center pr-4 text-lg font-bold text-[#C0444E]">{p.losses ?? 0}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-[11px] text-[#94A3B8] text-center">
+                  gaspadel.vercel.app
+                </p>
+              </>
             )}
-            {leaderboardSorted.length > 0 && (
+            {leaderboardSorted.length > 0 && !leaderboardSorted.some((p) => (p.gamesPlayed ?? 0) > 0) && (
               <p className="text-xs text-[#64748B] text-center">
                 Sorted by total Americano points, then wins.
               </p>

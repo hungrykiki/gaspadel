@@ -51,3 +51,12 @@ body {
   color: #1A1A1A;
   border: 2px solid #E2E8F0;
 }
+
+/* Pulsing "Live" dot on Schedule current round */
+@keyframes schedule-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(1.1); }
+}
+.schedule-live-dot {
+  animation: schedule-live-pulse 1.5s ease-in-out infinite;
+}

@@ -13,8 +13,24 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "gaspadel",
-  description: "Padel Americano score keeping and matchmaking",
+  title: "Gaspadel",
+  description: "Your friends are late again. Start without them.",
+  manifest: "/manifest.json",
+  openGraph: {
+    title: "Gaspadel",
+    description: "Your friends are late again. Start without them.",
+    images: [
+      {
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Gaspadel",
+      },
+    ],
+  },
+  icons: {
+    icon: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({
