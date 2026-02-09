@@ -441,15 +441,15 @@ export default function Home() {
 
   return (
     <div className="min-h-screen font-sans bg-[#FFFFFF] text-[#1A1A1A]">
-      <div className="mx-auto max-w-lg min-w-0 w-full px-3 sm:px-4 pb-20 sm:pb-24 safe-area-pb box-border">
+      <div className="mx-auto max-w-lg min-w-0 w-full px-3 sm:px-4 pb-20 box-border">
         <AppHeader screen={screen} setScreen={setScreen} />
 
         {/* --- Setup Screen --- */}
         {screen === "setup" && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Session Status Banner */}
             {sessionActive && (
-              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+              <div className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)] mt-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-base font-semibold text-[#1E3A5F]">Session Active</p>
@@ -470,7 +470,7 @@ export default function Home() {
 
             {/* Courts: always editable on Setup, including mid-session */}
             <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-              <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Courts</h2>
+              <h2 className="text-base font-semibold text-[#1A1A1A] mb-2">Courts</h2>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -489,12 +489,12 @@ export default function Home() {
                     }
                   }}
                   disabled={config.courts === 1}
-                  className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
+                  className="flex-shrink-0 w-10 h-10 rounded-[20px] bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-sm font-bold touch-manipulation"
                   aria-label="Decrease courts"
                 >
                   −
                 </button>
-                <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-3 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
+                <div className="flex-1 min-w-0 rounded-[20px] bg-[#F1F5F9] px-5 py-3 text-center text-sm font-semibold text-[#1E3A5F] border border-[#E2E8F0] h-10 flex items-center justify-center">
                   {config.courts} court{config.courts !== 1 ? "s" : ""}
                 </div>
                 <button
@@ -538,7 +538,7 @@ export default function Home() {
                     }
                   }}
                   disabled={config.courts === 4}
-                  className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] disabled:opacity-50 disabled:cursor-not-allowed text-white text-xl font-bold touch-manipulation"
+                  className="flex-shrink-0 w-10 h-10 rounded-[20px] bg-[#2DBDA8] hover:bg-[#238F7E] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-bold touch-manipulation"
                   aria-label="Increase courts"
                 >
                   +
@@ -551,78 +551,134 @@ export default function Home() {
               )}
             </section>
 
-            {/* Rounds summary + collapsible Adjust (during session) */}
+            {/* Duration / Match length card (during session) with nested Rounds */}
             {sessionActive && (
-              <div className="px-1">
-                <p className="text-sm text-[#1A1A1A] flex flex-wrap items-center gap-1.5">
-                  <span>📋 {config.rounds} rounds · {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining</span>
-                  <button
-                    type="button"
-                    onClick={() => setRoundsAdjustExpanded((e) => !e)}
-                    className="text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
-                  >
-                    Adjust
-                  </button>
-                </p>
-                {roundsAdjustExpanded && (
-                  <div className="mt-3 flex flex-col gap-2">
-                    <div className="flex items-center gap-2">
+              <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                <h2 className="text-base font-semibold text-[#1A1A1A] mb-2">Duration / Match length</h2>
+                <div>
+                  <p className="text-xs text-[#2DBDA8] mb-2">Duration</p>
+                  <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 mb-3">
+                    {durationOptions.map((mins) => (
                       <button
+                        key={mins}
                         type="button"
-                        onClick={() => {
-                          const newRounds = Math.max(currentRound, config.rounds - 1);
-                          setConfig({ rounds: newRounds });
-                        }}
-                        disabled={config.rounds <= currentRound}
-                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-xl font-bold touch-manipulation"
-                        aria-label="Decrease rounds"
+                        onClick={() => setSessionDuration(mins)}
+                        className={`shrink-0 h-10 rounded-[20px] px-5 py-3 text-sm font-semibold transition-all touch-manipulation ${
+                          sessionDuration === mins
+                            ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                            : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40"
+                        }`}
                       >
-                        −
+                        {mins} min
                       </button>
-                      <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
-                        {config.rounds}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setRoundsWithSchedule(config.rounds + 1)}
-                        className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
-                        aria-label="Increase rounds"
-                      >
-                        +
-                      </button>
-                    </div>
-                    {activePlayers.length >= 4 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const recommended = balancedRoundParams.balancedRounds;
-                          const newRounds = Math.max(currentRound, recommended);
-                          setRoundsWithSchedule(newRounds);
-                        }}
-                        className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
-                      >
-                        Recommended: {balancedRoundParams.balancedRounds} (balanced play)
-                      </button>
-                    )}
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = durationOptions[durationOptions.length - 1] + 60;
+                        setDurationOptions((prev) => [...prev, next]);
+                        setSessionDuration(next);
+                      }}
+                      className="shrink-0 h-10 rounded-[20px] px-5 py-3 text-sm font-medium bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40 transition touch-manipulation"
+                      aria-label="Add 60 minutes"
+                    >
+                      +
+                    </button>
                   </div>
-                )}
-              </div>
+                </div>
+
+                <div>
+                  <p className="text-xs text-[#2DBDA8] mb-2">Match length</p>
+                  <div className="flex gap-2 flex-wrap mb-3">
+                    {[16, 21, 32].map((pts) => (
+                      <button
+                        key={pts}
+                        type="button"
+                        onClick={() => setConfig({ pointsPerMatch: pts })}
+                        className={`h-10 rounded-[20px] px-5 py-3 text-sm font-semibold transition-all touch-manipulation ${
+                          config.pointsPerMatch === pts
+                            ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
+                            : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40"
+                        }`}
+                      >
+                        {pts} pts
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Rounds summary + collapsible Adjust (during session) */}
+                <div className="pt-2 border-t border-[#E2E8F0]">
+                  <p className="text-sm font-normal text-[#1A1A1A] flex flex-wrap items-center gap-1.5 mb-3">
+                    <span>📋 {config.rounds} rounds · {currentRound} completed · {Math.max(0, config.rounds - currentRound)} remaining</span>
+                    <button
+                      type="button"
+                      onClick={() => setRoundsAdjustExpanded((e) => !e)}
+                      className="text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                    >
+                      {roundsAdjustExpanded ? "Hide" : "Adjust"}
+                    </button>
+                  </p>
+                  {roundsAdjustExpanded && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const newRounds = Math.max(currentRound, config.rounds - 1);
+                            setConfig({ rounds: newRounds });
+                          }}
+                          disabled={config.rounds <= currentRound}
+                          className="flex-shrink-0 w-10 h-10 rounded-[20px] bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-sm font-bold touch-manipulation"
+                          aria-label="Decrease rounds"
+                        >
+                          −
+                        </button>
+                        <div className="flex-1 min-w-0 rounded-[20px] bg-[#F1F5F9] px-5 py-3 text-center text-sm font-semibold text-[#1E3A5F] border border-[#E2E8F0] h-10 flex items-center justify-center">
+                          {config.rounds}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setRoundsWithSchedule(config.rounds + 1)}
+                          className="flex-shrink-0 w-10 h-10 rounded-[20px] bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-sm font-bold touch-manipulation"
+                          aria-label="Increase rounds"
+                        >
+                          +
+                        </button>
+                      </div>
+                      {activePlayers.length >= 4 && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const recommended = balancedRoundParams.balancedRounds;
+                            const newRounds = Math.max(currentRound, recommended);
+                            setRoundsWithSchedule(newRounds);
+                          }}
+                          className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                        >
+                          Recommended: {balancedRoundParams.balancedRounds} (balanced play)
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </section>
             )}
 
             {/* When no session: 3 hero inputs (Courts above) + Duration + Match length, then small rounds line */}
             {!sessionActive && (
               <>
-                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 space-y-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-                  <h2 className="text-lg font-semibold text-[#1A1A1A] mb-2">Duration / Match length</h2>
+                <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+                  <h2 className="text-base font-semibold text-[#1A1A1A] mb-2">Duration / Match length</h2>
                   <div>
-                    <p className="text-xs text-[#64748B] mb-1.5">Duration</p>
-                    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
+                    <p className="text-xs text-[#2DBDA8] mb-2">Duration</p>
+                    <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 mb-3">
                       {durationOptions.map((mins) => (
                         <button
                           key={mins}
                           type="button"
                           onClick={() => setSessionDuration(mins)}
-                          className={`shrink-0 rounded-xl px-4 py-3 text-sm font-semibold transition-all touch-manipulation ${
+                          className={`shrink-0 h-10 rounded-[20px] px-5 py-3 text-sm font-semibold transition-all touch-manipulation ${
                             sessionDuration === mins
                               ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
                               : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40"
@@ -638,7 +694,7 @@ export default function Home() {
                           setDurationOptions((prev) => [...prev, next]);
                           setSessionDuration(next);
                         }}
-                        className="shrink-0 rounded-xl px-4 py-3 text-sm font-medium bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40 transition touch-manipulation"
+                        className="shrink-0 h-10 rounded-[20px] px-5 py-3 text-sm font-medium bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40 transition touch-manipulation"
                         aria-label="Add 60 minutes"
                       >
                         +
@@ -647,14 +703,14 @@ export default function Home() {
                   </div>
 
                   <div>
-                    <p className="text-xs text-[#64748B] mb-1.5">Match length</p>
-                    <div className="flex gap-2 flex-wrap">
+                    <p className="text-xs text-[#2DBDA8] mb-2">Match length</p>
+                    <div className="flex gap-2 flex-wrap mb-3">
                       {[16, 21, 32].map((pts) => (
                         <button
                           key={pts}
                           type="button"
                           onClick={() => setConfig({ pointsPerMatch: pts })}
-                          className={`rounded-full px-4 py-2.5 text-sm font-semibold transition-all touch-manipulation ${
+                          className={`h-10 rounded-[20px] px-5 py-3 text-sm font-semibold transition-all touch-manipulation ${
                             config.pointsPerMatch === pts
                               ? "bg-[#2DBDA8] text-white shadow-[0_2px_6px_rgba(45,189,168,0.4)]"
                               : "bg-white text-[#1A1A1A] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/40"
@@ -665,60 +721,60 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
-                </section>
 
-                {/* Rounds summary + collapsible Adjust (pre-session) */}
-                {(() => {
-                  const N = Math.max(4, activePlayers.length);
-                  const matchesPerPlayer = N > 0 ? Math.floor((4 * config.rounds * config.courts) / N) : 0;
-                  return (
-                    <div className="px-1">
-                      <p className="text-sm text-[#1A1A1A] flex flex-wrap items-center gap-1.5">
-                        <span>📋 {config.rounds} rounds · everyone plays {matchesPerPlayer} matches</span>
-                        <button
-                          type="button"
-                          onClick={() => setRoundsAdjustExpanded((e) => !e)}
-                          className="text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
-                        >
-                          Adjust
-                        </button>
-                      </p>
-                      {roundsAdjustExpanded && (
-                        <div className="mt-3 flex flex-col gap-2">
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
-                              disabled={config.rounds === 1}
-                              className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] text-[#1E3A5F] text-xl font-bold touch-manipulation"
-                              aria-label="Decrease rounds"
-                            >
-                              −
-                            </button>
-                            <div className="flex-1 min-w-0 rounded-xl bg-[#F1F5F9] px-4 py-2.5 text-center text-lg font-semibold text-[#1E3A5F] border border-[#E2E8F0]">
-                              {config.rounds}
+                  {/* Rounds summary + collapsible Adjust (pre-session) */}
+                  {(() => {
+                    const N = Math.max(4, activePlayers.length);
+                    const matchesPerPlayer = N > 0 ? Math.floor((4 * config.rounds * config.courts) / N) : 0;
+                    return (
+                      <div className="pt-2 border-t border-[#E2E8F0]">
+                        <p className="text-sm font-normal text-[#1A1A1A] flex flex-wrap items-center gap-1.5 mb-3">
+                          <span>📋 {config.rounds} rounds · everyone plays {matchesPerPlayer} matches</span>
+                          <button
+                            type="button"
+                            onClick={() => setRoundsAdjustExpanded((e) => !e)}
+                            className="text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
+                          >
+                            {roundsAdjustExpanded ? "Hide" : "Adjust"}
+                          </button>
+                        </p>
+                        {roundsAdjustExpanded && (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setConfig({ rounds: Math.max(1, config.rounds - 1) })}
+                                disabled={config.rounds === 1}
+                                className="flex-shrink-0 w-10 h-10 rounded-[20px] bg-[#F1F5F9] hover:bg-[#E2E8F0] disabled:opacity-50 disabled:bg-[#B0BEC5] disabled:cursor-not-allowed text-[#1E3A5F] text-sm font-bold touch-manipulation"
+                                aria-label="Decrease rounds"
+                              >
+                                −
+                              </button>
+                              <div className="flex-1 min-w-0 rounded-[20px] bg-[#F1F5F9] px-5 py-3 text-center text-sm font-semibold text-[#1E3A5F] border border-[#E2E8F0] h-10 flex items-center justify-center">
+                                {config.rounds}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => setConfig({ rounds: config.rounds + 1 })}
+                                className="flex-shrink-0 w-10 h-10 rounded-[20px] bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-sm font-bold touch-manipulation"
+                                aria-label="Increase rounds"
+                              >
+                                +
+                              </button>
                             </div>
                             <button
                               type="button"
-                              onClick={() => setConfig({ rounds: config.rounds + 1 })}
-                              className="flex-shrink-0 w-12 h-12 rounded-xl bg-[#2DBDA8] hover:bg-[#238F7E] text-white text-xl font-bold touch-manipulation"
-                              aria-label="Increase rounds"
+                              onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
+                              className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
                             >
-                              +
+                              Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
                             </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setConfig({ rounds: balancedRoundParams.balancedRounds })}
-                            className="block w-full text-center text-[12px] sm:text-[13px] text-[#2DBDA8] hover:text-[#238F7E] hover:underline touch-manipulation"
-                          >
-                            Recommended: {balancedRoundParams.balancedRounds} (fills {sessionDuration} min)
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })()}
+                        )}
+                      </div>
+                    );
+                  })()}
+                </section>
 
                 <section className="rounded-2xl bg-white border border-[#E2E8F0] p-4 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
                   <button
