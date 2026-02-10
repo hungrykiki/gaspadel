@@ -126,11 +126,10 @@ export default function Home() {
   const [sessionDuration, setSessionDuration] = useState<number>(60);
   const [durationOptions, setDurationOptions] = useState<number[]>([60, 120, 180]);
   const [algorithmExpanded, setAlgorithmExpanded] = useState(false);
-  // Direct score input: which team's score is being edited ("A", "B", or null)
+  // Edit mode for session match: enables swap + direct score input
+  const [matchEditMode, setMatchEditMode] = useState(false);
   const [directScoreEditing, setDirectScoreEditing] = useState<"A" | "B" | null>(null);
   const [directScoreValue, setDirectScoreValue] = useState("");
-  // Player swap: which player slot is being swapped (team + index within that team)
-  const [swapTarget, setSwapTarget] = useState<{ team: "A" | "B"; index: number } | null>(null);
   const [roundsAdjustExpanded, setRoundsAdjustExpanded] = useState(false);
 
   const addToast = useCallback((message: string) => {
@@ -165,11 +164,11 @@ export default function Home() {
     return [...new Set((currentRoundData?.matches ?? []).map((m) => m.court))].sort((a, b) => a - b);
   }, [currentRoundData]);
 
-  // Clear direct score editing and swap state when match changes
+  // Clear edit mode, direct score editing, and swap state when match changes
   useEffect(() => {
+    setMatchEditMode(false);
     setDirectScoreEditing(null);
     setDirectScoreValue("");
-    setSwapTarget(null);
   }, [currentMatch?.id]);
 
   // Keep selectedCourt valid when schedule changes (e.g. add/remove court)
@@ -396,16 +395,14 @@ export default function Home() {
 
   // Handle swapping a player in the current match
   const handlePlayerSwap = useCallback(
-    (replacementId: string) => {
-      if (!swapTarget || !currentMatch || !currentRoundData) return;
-      const { team, index } = swapTarget;
+    (team: "A" | "B", index: number, replacementId: string) => {
+      if (!currentMatch || !currentRoundData) return;
 
-      // Get the player being swapped out
       const currentTeam = team === "A" ? currentMatch.teamA.playerIds : currentMatch.teamB.playerIds;
       const swappedOutId = currentTeam[index];
-      if (!swappedOutId) return;
+      if (!swappedOutId || swappedOutId === replacementId) return;
 
-      // Check if replacement is sitting out or in this match's other team
+      // Check if replacement is in the other team of this match
       const otherTeam = team === "A" ? currentMatch.teamB.playerIds : currentMatch.teamA.playerIds;
       const replacementInOtherTeamIndex = otherTeam.indexOf(replacementId);
 
@@ -413,7 +410,7 @@ export default function Home() {
       let newTeamB = [...currentMatch.teamB.playerIds];
 
       if (replacementInOtherTeamIndex >= 0) {
-        // Swap positions: replacement is on the other team, so swap them
+        // Swap positions between teams
         if (team === "A") {
           newTeamA[index] = replacementId;
           newTeamB[replacementInOtherTeamIndex] = swappedOutId;
@@ -422,7 +419,7 @@ export default function Home() {
           newTeamA[replacementInOtherTeamIndex] = swappedOutId;
         }
       } else {
-        // Replacement is sitting out — swap in and swapped-out goes to sitting out
+        // Replacement is sitting out
         if (team === "A") {
           newTeamA[index] = replacementId;
         } else {
@@ -430,7 +427,6 @@ export default function Home() {
         }
       }
 
-      // Build updated match with reset score
       const updatedMatch = {
         ...currentMatch,
         teamA: { playerIds: newTeamA },
@@ -439,12 +435,10 @@ export default function Home() {
         status: "upcoming" as const,
       };
 
-      // Update the round's matches
       const updatedMatches = currentRoundData.matches.map((m) =>
         m.id === currentMatch.id ? updatedMatch : m
       );
 
-      // Recompute sitting out
       const allActive = players.filter((p) => p.status === "active");
       const playingThisRound = new Set(
         updatedMatches.flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
@@ -461,10 +455,9 @@ export default function Home() {
         )
       );
 
-      setSwapTarget(null);
       addToast(`Swapped player — scores reset`);
     },
-    [swapTarget, currentMatch, currentRoundData, players, schedule, currentRound, setSchedule, addToast]
+    [currentMatch, currentRoundData, players, schedule, currentRound, setSchedule, addToast]
   );
 
   // Get all players currently playing across all courts in current round
@@ -1342,9 +1335,42 @@ export default function Home() {
                 {/* Add more rounds — tight under tab bar, no gap */}
                 {/* Court header + progress — 8px padding, directly above score zones */}
                 <div className="bg-[#FFFFFF] border-b border-[#E2E8F0] px-2 py-2 shrink-0">
-                  <h2 className="text-base font-bold text-[#1E3A5F]">
-                    Court {selectedCourt} · Round {currentRound} of {config.rounds}
-                  </h2>
+                  <div className="flex items-center justify-between">
+                    <h2 className="text-base font-bold text-[#1E3A5F]">
+                      Court {selectedCourt} · Round {currentRound} of {config.rounds}
+                    </h2>
+                    {/* Edit mode toggle */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMatchEditMode((m) => !m);
+                        if (matchEditMode) {
+                          setDirectScoreEditing(null);
+                          setDirectScoreValue("");
+                        }
+                      }}
+                      className="touch-manipulation transition-colors p-1"
+                      aria-label={matchEditMode ? "Exit edit mode" : "Enter edit mode"}
+                      title={matchEditMode ? "Exit edit mode" : "Edit match (swap players, enter scores)"}
+                    >
+                      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path
+                          d="M14.85 2.85a1.5 1.5 0 0 1 2.12 0l.18.18a1.5 1.5 0 0 1 0 2.12L7.04 15.26a1 1 0 0 1-.47.26l-3.08.88a.5.5 0 0 1-.62-.62l.88-3.08a1 1 0 0 1 .26-.47L14.85 2.85Z"
+                          stroke={matchEditMode ? "#2DBDA8" : "#94A3B8"}
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          fill="none"
+                        />
+                        <path
+                          d="M13.5 4.5l2 2"
+                          stroke={matchEditMode ? "#2DBDA8" : "#94A3B8"}
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
                   <div className="w-full h-1 bg-[#E2E8F0] rounded-full overflow-hidden mt-1">
                     <div
                       className="h-full bg-[#2DBDA8] transition-all duration-300"
@@ -1407,90 +1433,61 @@ export default function Home() {
 
                   return (
                     <div className="flex flex-col flex-1 min-h-0 min-w-0">
-                      {/* Team A — soft sage/mint */}
+                      {/* Team A */}
                       <div
                         onClick={() => {
-                          if (!canIncrease || !match || swapTarget) return;
+                          if (matchEditMode || !canIncrease || !match) return;
                           vibrate();
                           updateMatchScore(currentRound, match.id, {
                             teamA: Math.min(config.pointsPerMatch, scoreA + 1),
                             teamB: scoreB,
                           });
                         }}
-                        style={!isMatchComplete ? { backgroundColor: "#F1F5F9" } : undefined}
-                        className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation cursor-pointer ${
-                          isMatchComplete && teamAWon
-                            ? "bg-[#2DBDA8]/20"
-                            : isMatchComplete
-                            ? "bg-[#E2E8F0]/50"
-                            : "hover:opacity-95 active:opacity-90 transition-opacity"
-                        } ${!canIncrease && !swapTarget ? "opacity-60 cursor-not-allowed" : ""}`}
+                        style={!isMatchComplete && !matchEditMode ? { backgroundColor: "#F1F5F9" } : undefined}
+                        className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation ${
+                          matchEditMode
+                            ? "bg-[#F8FAFB] cursor-default"
+                            : `cursor-pointer ${
+                                isMatchComplete && teamAWon
+                                  ? "bg-[#2DBDA8]/20"
+                                  : isMatchComplete
+                                  ? "bg-[#E2E8F0]/50"
+                                  : "hover:opacity-95 active:opacity-90 transition-opacity"
+                              } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`
+                        }`}
                       >
-                        {/* Player names with swap hint */}
-                        <div className="flex items-center justify-center gap-1.5 mb-2 px-2 w-full relative">
+                        {/* Player names */}
+                        <div className="flex items-center justify-center gap-1.5 mb-2 px-2 w-full">
                           {match.teamA.playerIds.map((id, idx) => (
                             <span key={id} className="flex items-center">
                               {idx > 0 && <span className="text-sm text-[#94A3B8] mx-1">&</span>}
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSwapTarget(
-                                    swapTarget?.team === "A" && swapTarget?.index === idx
-                                      ? null
-                                      : { team: "A", index: idx }
-                                  );
-                                }}
-                                className={`inline-flex items-center gap-0.5 text-base font-bold break-words touch-manipulation rounded-lg px-1.5 py-0.5 transition-colors ${
-                                  swapTarget?.team === "A" && swapTarget?.index === idx
-                                    ? "bg-[#2DBDA8]/20 ring-1 ring-[#2DBDA8]"
-                                    : "hover:bg-[#2DBDA8]/10"
-                                }`}
-                                style={{ color: "#1A1A1A" }}
-                                aria-label={`Swap ${getPlayer(id)?.name}`}
-                              >
-                                {getPlayer(id)?.name}
-                                <span className="text-[10px] text-[#94A3B8] ml-0.5">⇄</span>
-                              </button>
+                              {matchEditMode ? (
+                                <select
+                                  value={id}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handlePlayerSwap("A", idx, e.target.value);
+                                  }}
+                                  className="text-sm font-semibold rounded-full px-3 py-1 border bg-[#E6F5F1] border-[#D0ECE7] text-[#1A1A1A] appearance-none touch-manipulation cursor-pointer focus:border-[#2DBDA8] focus:ring-1 focus:ring-[#2DBDA8]/30 outline-none transition-colors"
+                                  aria-label={`Swap ${getPlayer(id)?.name}`}
+                                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%232DBDA8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center", paddingRight: "24px" }}
+                                >
+                                  <option value={id}>{getPlayer(id)?.name}</option>
+                                  {swapCandidates.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="text-base font-bold" style={{ color: "#1A1A1A" }}>
+                                  {getPlayer(id)?.name}
+                                </span>
+                              )}
                             </span>
                           ))}
-                          {/* Swap dropdown for Team A */}
-                          {swapTarget?.team === "A" && (
-                            <div
-                              className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-30 w-56 max-h-48 overflow-y-auto rounded-xl bg-white border border-[#E2E8F0] shadow-lg py-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {swapCandidates.length === 0 ? (
-                                <p className="px-3 py-2 text-sm text-[#94A3B8] text-center">No available players</p>
-                              ) : (
-                                swapCandidates.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => handlePlayerSwap(p.id)}
-                                    className="w-full text-left px-3 py-2 text-sm text-[#1A1A1A] hover:bg-[#2DBDA8]/10 active:bg-[#2DBDA8]/20 touch-manipulation transition-colors"
-                                  >
-                                    {p.name}
-                                    {p.gender && config.algorithm === "mix_americano" && (
-                                      <span className={`ml-1.5 text-[10px] font-bold ${p.gender === "M" ? "text-blue-500" : "text-pink-500"}`}>{p.gender}</span>
-                                    )}
-                                    {config.algorithm === "skill_americano" && (
-                                      <span className="ml-1.5 text-[10px] font-bold text-[#64748B]">Skill {p.skill}</span>
-                                    )}
-                                  </button>
-                                ))
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => setSwapTarget(null)}
-                                className="w-full text-center px-3 py-1.5 text-xs text-[#94A3B8] hover:text-[#64748B] border-t border-[#E2E8F0] mt-1"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
                         </div>
-                        {directScoreEditing === "A" ? (
+                        {/* Score */}
+                        {matchEditMode && directScoreEditing === "A" ? (
                           <input
                             type="number"
                             inputMode="numeric"
@@ -1502,7 +1499,6 @@ export default function Home() {
                             onChange={(e) => setDirectScoreValue(e.target.value)}
                             onBlur={() => {
                               const val = Math.max(0, Math.min(config.pointsPerMatch, parseInt(directScoreValue) || 0));
-                              // Clamp so teamA + teamB <= max
                               const clampedA = Math.min(val, config.pointsPerMatch - scoreB);
                               updateMatchScore(currentRound, match.id, { teamA: clampedA, teamB: scoreB });
                               setDirectScoreEditing(null);
@@ -1512,10 +1508,10 @@ export default function Home() {
                               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                               if (e.key === "Escape") { setDirectScoreEditing(null); setDirectScoreValue(""); }
                             }}
-                            className="w-24 text-center text-[56px] sm:text-[72px] font-bold leading-none bg-white/80 border-b-2 border-[#2DBDA8] rounded-lg outline-none"
+                            className="w-28 text-center text-[56px] sm:text-[72px] font-bold leading-none bg-white border border-[#2DBDA8] rounded-xl outline-none ring-2 ring-[#2DBDA8]/30"
                             style={{ color: "#1A1A1A" }}
                           />
-                        ) : (
+                        ) : matchEditMode ? (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1523,17 +1519,23 @@ export default function Home() {
                               setDirectScoreEditing("A");
                               setDirectScoreValue(scoreA.toString());
                             }}
-                            className="relative group"
+                            className="touch-manipulation"
                             aria-label="Edit score directly"
                           >
                             <div
-                              className={`text-[56px] sm:text-[72px] font-bold leading-none border-b-2 border-dashed border-[#2DBDA8]/40 group-hover:border-[#2DBDA8] transition-colors ${isMatchComplete && teamAWon ? "text-[#2DBDA8]" : ""}`}
-                              style={!isMatchComplete || !teamAWon ? { color: "#1A1A1A" } : undefined}
+                              className="text-[56px] sm:text-[72px] font-bold leading-none bg-[#E6F5F1] border border-[#E2E8F0] rounded-xl px-4 py-1 transition-colors hover:border-[#2DBDA8]/60"
+                              style={{ color: isMatchComplete && teamAWon ? "#2DBDA8" : "#1A1A1A" }}
                             >
                               {scoreA}
                             </div>
-                            <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-[#94A3B8] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">tap to edit</span>
                           </button>
+                        ) : (
+                          <div
+                            className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && teamAWon ? "text-[#2DBDA8]" : ""}`}
+                            style={!isMatchComplete || !teamAWon ? { color: "#1A1A1A" } : undefined}
+                          >
+                            {scoreA}
+                          </div>
                         )}
                         {isMatchComplete && teamAWon && (
                           <p className="mt-2 text-base font-bold text-[#2DBDA8]">🏆 Winner!</p>
@@ -1546,7 +1548,7 @@ export default function Home() {
                             vibrate();
                             updateMatchScore(currentRound, match.id, { teamA: Math.max(0, scoreA - 1), teamB: scoreB });
                           }}
-                          className="absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity"
+                          className={`absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity ${matchEditMode ? "opacity-40" : ""}`}
                           style={{ backgroundColor: "#1E3A5F" }}
                           aria-label="Subtract 1 point"
                         >
@@ -1557,90 +1559,61 @@ export default function Home() {
                       {/* Subtle divider */}
                       <div className="h-0.5 shrink-0" style={{ backgroundColor: "#E2E8F0" }} />
 
-                      {/* Team B — light blue tint */}
+                      {/* Team B */}
                       <div
                         onClick={() => {
-                          if (!canIncrease || !match || swapTarget) return;
+                          if (matchEditMode || !canIncrease || !match) return;
                           vibrate();
                           updateMatchScore(currentRound, match.id, {
                             teamA: scoreA,
                             teamB: Math.min(config.pointsPerMatch, scoreB + 1),
                           });
                         }}
-                        style={!isMatchComplete ? { backgroundColor: "#F1F5F9" } : undefined}
-                        className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation cursor-pointer ${
-                          isMatchComplete && !teamAWon
-                            ? "bg-[#2DBDA8]/20"
-                            : isMatchComplete
-                            ? "bg-[#E2E8F0]/50"
-                            : "hover:opacity-95 active:opacity-90 transition-opacity"
-                        } ${!canIncrease && !swapTarget ? "opacity-60 cursor-not-allowed" : ""}`}
+                        style={!isMatchComplete && !matchEditMode ? { backgroundColor: "#F1F5F9" } : undefined}
+                        className={`relative flex-1 flex flex-col items-center justify-center p-3 min-h-0 touch-manipulation ${
+                          matchEditMode
+                            ? "bg-[#F8FAFB] cursor-default"
+                            : `cursor-pointer ${
+                                isMatchComplete && !teamAWon
+                                  ? "bg-[#2DBDA8]/20"
+                                  : isMatchComplete
+                                  ? "bg-[#E2E8F0]/50"
+                                  : "hover:opacity-95 active:opacity-90 transition-opacity"
+                              } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`
+                        }`}
                       >
-                        {/* Player names with swap hint */}
-                        <div className="flex items-center justify-center gap-1.5 mb-2 px-2 w-full relative">
+                        {/* Player names */}
+                        <div className="flex items-center justify-center gap-1.5 mb-2 px-2 w-full">
                           {match.teamB.playerIds.map((id, idx) => (
                             <span key={id} className="flex items-center">
                               {idx > 0 && <span className="text-sm text-[#94A3B8] mx-1">&</span>}
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setSwapTarget(
-                                    swapTarget?.team === "B" && swapTarget?.index === idx
-                                      ? null
-                                      : { team: "B", index: idx }
-                                  );
-                                }}
-                                className={`inline-flex items-center gap-0.5 text-base font-bold break-words touch-manipulation rounded-lg px-1.5 py-0.5 transition-colors ${
-                                  swapTarget?.team === "B" && swapTarget?.index === idx
-                                    ? "bg-[#2DBDA8]/20 ring-1 ring-[#2DBDA8]"
-                                    : "hover:bg-[#2DBDA8]/10"
-                                }`}
-                                style={{ color: "#1A1A1A" }}
-                                aria-label={`Swap ${getPlayer(id)?.name}`}
-                              >
-                                {getPlayer(id)?.name}
-                                <span className="text-[10px] text-[#94A3B8] ml-0.5">⇄</span>
-                              </button>
+                              {matchEditMode ? (
+                                <select
+                                  value={id}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    handlePlayerSwap("B", idx, e.target.value);
+                                  }}
+                                  className="text-sm font-semibold rounded-full px-3 py-1 border bg-[#E6F5F1] border-[#D0ECE7] text-[#1A1A1A] appearance-none touch-manipulation cursor-pointer focus:border-[#2DBDA8] focus:ring-1 focus:ring-[#2DBDA8]/30 outline-none transition-colors"
+                                  aria-label={`Swap ${getPlayer(id)?.name}`}
+                                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%232DBDA8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center", paddingRight: "24px" }}
+                                >
+                                  <option value={id}>{getPlayer(id)?.name}</option>
+                                  {swapCandidates.map((p) => (
+                                    <option key={p.id} value={p.id}>{p.name}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span className="text-base font-bold" style={{ color: "#1A1A1A" }}>
+                                  {getPlayer(id)?.name}
+                                </span>
+                              )}
                             </span>
                           ))}
-                          {/* Swap dropdown for Team B */}
-                          {swapTarget?.team === "B" && (
-                            <div
-                              className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 w-56 max-h-48 overflow-y-auto rounded-xl bg-white border border-[#E2E8F0] shadow-lg py-1"
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              {swapCandidates.length === 0 ? (
-                                <p className="px-3 py-2 text-sm text-[#94A3B8] text-center">No available players</p>
-                              ) : (
-                                swapCandidates.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    type="button"
-                                    onClick={() => handlePlayerSwap(p.id)}
-                                    className="w-full text-left px-3 py-2 text-sm text-[#1A1A1A] hover:bg-[#2DBDA8]/10 active:bg-[#2DBDA8]/20 touch-manipulation transition-colors"
-                                  >
-                                    {p.name}
-                                    {p.gender && config.algorithm === "mix_americano" && (
-                                      <span className={`ml-1.5 text-[10px] font-bold ${p.gender === "M" ? "text-blue-500" : "text-pink-500"}`}>{p.gender}</span>
-                                    )}
-                                    {config.algorithm === "skill_americano" && (
-                                      <span className="ml-1.5 text-[10px] font-bold text-[#64748B]">Skill {p.skill}</span>
-                                    )}
-                                  </button>
-                                ))
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => setSwapTarget(null)}
-                                className="w-full text-center px-3 py-1.5 text-xs text-[#94A3B8] hover:text-[#64748B] border-t border-[#E2E8F0] mt-1"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          )}
                         </div>
-                        {directScoreEditing === "B" ? (
+                        {/* Score */}
+                        {matchEditMode && directScoreEditing === "B" ? (
                           <input
                             type="number"
                             inputMode="numeric"
@@ -1652,7 +1625,6 @@ export default function Home() {
                             onChange={(e) => setDirectScoreValue(e.target.value)}
                             onBlur={() => {
                               const val = Math.max(0, Math.min(config.pointsPerMatch, parseInt(directScoreValue) || 0));
-                              // Clamp so teamA + teamB <= max
                               const clampedB = Math.min(val, config.pointsPerMatch - scoreA);
                               updateMatchScore(currentRound, match.id, { teamA: scoreA, teamB: clampedB });
                               setDirectScoreEditing(null);
@@ -1662,10 +1634,10 @@ export default function Home() {
                               if (e.key === "Enter") (e.target as HTMLInputElement).blur();
                               if (e.key === "Escape") { setDirectScoreEditing(null); setDirectScoreValue(""); }
                             }}
-                            className="w-24 text-center text-[56px] sm:text-[72px] font-bold leading-none bg-white/80 border-b-2 border-[#2DBDA8] rounded-lg outline-none"
+                            className="w-28 text-center text-[56px] sm:text-[72px] font-bold leading-none bg-white border border-[#2DBDA8] rounded-xl outline-none ring-2 ring-[#2DBDA8]/30"
                             style={{ color: "#1A1A1A" }}
                           />
-                        ) : (
+                        ) : matchEditMode ? (
                           <button
                             type="button"
                             onClick={(e) => {
@@ -1673,17 +1645,23 @@ export default function Home() {
                               setDirectScoreEditing("B");
                               setDirectScoreValue(scoreB.toString());
                             }}
-                            className="relative group"
+                            className="touch-manipulation"
                             aria-label="Edit score directly"
                           >
                             <div
-                              className={`text-[56px] sm:text-[72px] font-bold leading-none border-b-2 border-dashed border-[#2DBDA8]/40 group-hover:border-[#2DBDA8] transition-colors ${isMatchComplete && !teamAWon ? "text-[#2DBDA8]" : ""}`}
-                              style={!isMatchComplete || teamAWon ? { color: "#1A1A1A" } : undefined}
+                              className="text-[56px] sm:text-[72px] font-bold leading-none bg-[#E6F5F1] border border-[#E2E8F0] rounded-xl px-4 py-1 transition-colors hover:border-[#2DBDA8]/60"
+                              style={{ color: isMatchComplete && !teamAWon ? "#2DBDA8" : "#1A1A1A" }}
                             >
                               {scoreB}
                             </div>
-                            <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-[#94A3B8] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">tap to edit</span>
                           </button>
+                        ) : (
+                          <div
+                            className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && !teamAWon ? "text-[#2DBDA8]" : ""}`}
+                            style={!isMatchComplete || teamAWon ? { color: "#1A1A1A" } : undefined}
+                          >
+                            {scoreB}
+                          </div>
                         )}
                         {isMatchComplete && !teamAWon && (
                           <p className="mt-2 text-base font-bold text-[#2DBDA8]">🏆 Winner!</p>
@@ -1696,7 +1674,7 @@ export default function Home() {
                             vibrate();
                             updateMatchScore(currentRound, match.id, { teamA: scoreA, teamB: Math.max(0, scoreB - 1) });
                           }}
-                          className="absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity"
+                          className={`absolute bottom-2 right-2 w-8 h-8 rounded-md text-white text-sm font-bold flex items-center justify-center touch-manipulation z-10 hover:opacity-90 active:opacity-80 transition-opacity ${matchEditMode ? "opacity-40" : ""}`}
                           style={{ backgroundColor: "#1E3A5F" }}
                           aria-label="Subtract 1 point"
                         >
