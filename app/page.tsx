@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useCallback, useMemo, useEffect } from "react";
-import { useStore, Player } from "../lib/store";
-import { generateSchedule, regenerateSchedule, getUniquePlayerName, generateRoundMatchups, generateMatchId } from "../lib/scheduler";
+import { useStore, Player, Algorithm, Gender } from "../lib/store";
+import { generateSchedule, regenerateSchedule, getUniquePlayerName, generateRoundMatchups, generateMatchId, reshuffleMatch, validateMixAmericano, isMexicanoFutureRound } from "../lib/scheduler";
 
 type Screen = "setup" | "session" | "leaderboard" | "schedule";
 
@@ -30,6 +30,18 @@ function skillPillStyle(skill: 1 | 2 | 3 | 4 | 5): { bg: string; textClass: stri
     bg: SKILL_HEX[skill],
     textClass: skill >= 3 ? whiteText : deepBlueText,
   };
+}
+
+// Algorithm option metadata
+const ALGORITHM_OPTIONS: { value: Algorithm; label: string; description: string }[] = [
+  { value: "americano", label: "Americano", description: "Random pairs each round, maximizing partner & opponent diversity." },
+  { value: "mexicano", label: "Mexicano", description: "Round 2+ pairings based on standings. Top plays top." },
+  { value: "mix_americano", label: "Mix Americano", description: "Like Americano, but every team is 1 male + 1 female." },
+  { value: "skill_americano", label: "Skill Americano", description: "Like Americano, but balances skill levels between teams." },
+];
+
+function algorithmLabel(alg: Algorithm): string {
+  return ALGORITHM_OPTIONS.find((o) => o.value === alg)?.label ?? alg;
 }
 
 /** Shared header: logo + tab bar. Same on every tab; only the active pill changes. */
@@ -100,9 +112,11 @@ export default function Home() {
   // Local UI state
   const [newName, setNewName] = useState("");
   const [newSkill, setNewSkill] = useState<1 | 2 | 3 | 4 | 5>(3);
+  const [newGender, setNewGender] = useState<Gender>("M");
   const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
   const [editingPlayerName, setEditingPlayerName] = useState("");
   const [editingPlayerSkill, setEditingPlayerSkill] = useState<1 | 2 | 3 | 4 | 5>(3);
+  const [editingPlayerGender, setEditingPlayerGender] = useState<Gender>("M");
   const [selectedCourt, setSelectedCourt] = useState<number>(1);
   const [scheduleFilterCourts, setScheduleFilterCourts] = useState<Set<number>>(new Set());
   const [scheduleFutureExpanded, setScheduleFutureExpanded] = useState(false);
@@ -112,6 +126,11 @@ export default function Home() {
   const [sessionDuration, setSessionDuration] = useState<number>(60);
   const [durationOptions, setDurationOptions] = useState<number[]>([60, 120, 180]);
   const [algorithmExpanded, setAlgorithmExpanded] = useState(false);
+  // Direct score input: which team's score is being edited ("A", "B", or null)
+  const [directScoreEditing, setDirectScoreEditing] = useState<"A" | "B" | null>(null);
+  const [directScoreValue, setDirectScoreValue] = useState("");
+  // Player swap: which player slot is being swapped (team + index within that team)
+  const [swapTarget, setSwapTarget] = useState<{ team: "A" | "B"; index: number } | null>(null);
   const [roundsAdjustExpanded, setRoundsAdjustExpanded] = useState(false);
 
   const addToast = useCallback((message: string) => {
@@ -146,6 +165,13 @@ export default function Home() {
     return [...new Set((currentRoundData?.matches ?? []).map((m) => m.court))].sort((a, b) => a - b);
   }, [currentRoundData]);
 
+  // Clear direct score editing and swap state when match changes
+  useEffect(() => {
+    setDirectScoreEditing(null);
+    setDirectScoreValue("");
+    setSwapTarget(null);
+  }, [currentMatch?.id]);
+
   // Keep selectedCourt valid when schedule changes (e.g. add/remove court)
   useEffect(() => {
     if (!sessionActive || courtsWithMatchInCurrentRound.length === 0) return;
@@ -157,9 +183,12 @@ export default function Home() {
   const addPlayer = useCallback(() => {
     const name = newName.trim();
     if (!name) return;
-    const skillToUse = config.algorithm === "balanced" ? newSkill : (3 as 1 | 2 | 3 | 4 | 5);
+    // Skill is only relevant for skill_americano; otherwise default to 3
+    const skillToUse = config.algorithm === "skill_americano" ? newSkill : (3 as 1 | 2 | 3 | 4 | 5);
+    // Gender is only relevant for mix_americano
+    const genderToUse: Gender = config.algorithm === "mix_americano" ? newGender : null;
     
-    storeAddPlayer(name, skillToUse);
+    storeAddPlayer(name, skillToUse, genderToUse);
     
     if (sessionActive) {
       const updatedPlayers = useStore.getState().players;
@@ -170,18 +199,21 @@ export default function Home() {
     
     setNewName("");
     setNewSkill(3);
-  }, [newName, newSkill, config, sessionActive, schedule, currentRound, storeAddPlayer, setSchedule, addToast]);
+    setNewGender("M");
+  }, [newName, newSkill, newGender, config, sessionActive, schedule, currentRound, storeAddPlayer, setSchedule, addToast]);
 
   const startEditingPlayer = useCallback((player: Player) => {
     setEditingPlayerId(player.id);
     setEditingPlayerName(player.name);
     setEditingPlayerSkill(player.skill);
+    setEditingPlayerGender(player.gender ?? "M");
   }, []);
 
   const cancelEditingPlayer = useCallback(() => {
     setEditingPlayerId(null);
     setEditingPlayerName("");
     setEditingPlayerSkill(3);
+    setEditingPlayerGender("M");
   }, []);
 
   const saveEditedPlayer = useCallback(() => {
@@ -201,7 +233,8 @@ export default function Home() {
     const uniqueName = getUniquePlayerName(trimmedName, players.filter((p) => p.id !== editingPlayerId));
     updatePlayer(editingPlayerId, {
       name: uniqueName,
-      skill: config.algorithm === "balanced" ? editingPlayerSkill : existingPlayer.skill,
+      skill: config.algorithm === "skill_americano" ? editingPlayerSkill : existingPlayer.skill,
+      gender: config.algorithm === "mix_americano" ? editingPlayerGender : existingPlayer.gender,
     });
 
     // If session is active, regenerate schedule
@@ -213,21 +246,31 @@ export default function Home() {
     }
 
     cancelEditingPlayer();
-  }, [editingPlayerId, editingPlayerName, editingPlayerSkill, config, players, sessionActive, schedule, currentRound, updatePlayer, setSchedule, cancelEditingPlayer]);
+  }, [editingPlayerId, editingPlayerName, editingPlayerSkill, editingPlayerGender, config, players, sessionActive, schedule, currentRound, updatePlayer, setSchedule, cancelEditingPlayer]);
 
   const updatePlayerSkill = useCallback((playerId: string, newSkill: 1 | 2 | 3 | 4 | 5) => {
-    if (config.algorithm !== "balanced") return;
-
+    if (config.algorithm !== "skill_americano") return;
     updatePlayer(playerId, { skill: newSkill });
-
-    // If session is active, regenerate schedule
     if (sessionActive) {
       const updatedPlayers = useStore.getState().players;
-      // Regenerate from NEXT round to preserve current round in progress
       const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
       setSchedule(newSchedule);
     }
   }, [config, sessionActive, schedule, currentRound, updatePlayer, setSchedule]);
+
+  // Toggle player gender (for mix_americano in-line toggle)
+  const togglePlayerGender = useCallback((playerId: string) => {
+    if (config.algorithm !== "mix_americano") return;
+    const player = players.find((p) => p.id === playerId);
+    if (!player) return;
+    const newGender: Gender = player.gender === "M" ? "F" : "M";
+    updatePlayer(playerId, { gender: newGender });
+    if (sessionActive) {
+      const updatedPlayers = useStore.getState().players;
+      const newSchedule = regenerateSchedule(updatedPlayers, config, schedule, currentRound + 1);
+      setSchedule(newSchedule);
+    }
+  }, [config, players, sessionActive, schedule, currentRound, updatePlayer, setSchedule]);
 
   const handleRemovePlayer = useCallback(
     (id: string) => {
@@ -285,12 +328,21 @@ export default function Home() {
   const startSession = useCallback(() => {
     if (activePlayers.length < config.courts * 4) return;
     
+    // Validate mix_americano gender requirements
+    if (config.algorithm === "mix_americano") {
+      const error = validateMixAmericano(activePlayers);
+      if (error) {
+        addToast(error);
+        return;
+      }
+    }
+    
     // Generate initial schedule
     const newSchedule = generateSchedule(activePlayers, config);
     setSchedule(newSchedule);
     storeStartSession();
     setScreen("session");
-  }, [activePlayers, config, setSchedule, storeStartSession]);
+  }, [activePlayers, config, setSchedule, storeStartSession, addToast]);
 
   const getPlayer = useCallback(
     (id: string) => players.find((p) => p.id === id),
@@ -319,6 +371,101 @@ export default function Home() {
   );
 
   const canStartSession = activePlayers.length >= config.courts * 4;
+
+  // Players available for swap: active, not paused, not playing on OTHER courts this round
+  const swapCandidates = useMemo(() => {
+    if (!currentMatch || !currentRoundData) return [];
+    const playingOnOtherCourts = new Set(
+      currentRoundData.matches
+        .filter((m) => m.court !== selectedCourt)
+        .flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
+    );
+    const currentMatchPlayers = new Set([
+      ...currentMatch.teamA.playerIds,
+      ...currentMatch.teamB.playerIds,
+    ]);
+    return players
+      .filter(
+        (p) =>
+          p.status === "active" &&
+          !playingOnOtherCourts.has(p.id) &&
+          !currentMatchPlayers.has(p.id)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [players, currentMatch, currentRoundData, selectedCourt]);
+
+  // Handle swapping a player in the current match
+  const handlePlayerSwap = useCallback(
+    (replacementId: string) => {
+      if (!swapTarget || !currentMatch || !currentRoundData) return;
+      const { team, index } = swapTarget;
+
+      // Get the player being swapped out
+      const currentTeam = team === "A" ? currentMatch.teamA.playerIds : currentMatch.teamB.playerIds;
+      const swappedOutId = currentTeam[index];
+      if (!swappedOutId) return;
+
+      // Check if replacement is sitting out or in this match's other team
+      const otherTeam = team === "A" ? currentMatch.teamB.playerIds : currentMatch.teamA.playerIds;
+      const replacementInOtherTeamIndex = otherTeam.indexOf(replacementId);
+
+      let newTeamA = [...currentMatch.teamA.playerIds];
+      let newTeamB = [...currentMatch.teamB.playerIds];
+
+      if (replacementInOtherTeamIndex >= 0) {
+        // Swap positions: replacement is on the other team, so swap them
+        if (team === "A") {
+          newTeamA[index] = replacementId;
+          newTeamB[replacementInOtherTeamIndex] = swappedOutId;
+        } else {
+          newTeamB[index] = replacementId;
+          newTeamA[replacementInOtherTeamIndex] = swappedOutId;
+        }
+      } else {
+        // Replacement is sitting out — swap in and swapped-out goes to sitting out
+        if (team === "A") {
+          newTeamA[index] = replacementId;
+        } else {
+          newTeamB[index] = replacementId;
+        }
+      }
+
+      // Build updated match with reset score
+      const updatedMatch = {
+        ...currentMatch,
+        teamA: { playerIds: newTeamA },
+        teamB: { playerIds: newTeamB },
+        score: { teamA: 0, teamB: 0 },
+        status: "upcoming" as const,
+      };
+
+      // Update the round's matches
+      const updatedMatches = currentRoundData.matches.map((m) =>
+        m.id === currentMatch.id ? updatedMatch : m
+      );
+
+      // Recompute sitting out
+      const allActive = players.filter((p) => p.status === "active");
+      const playingThisRound = new Set(
+        updatedMatches.flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
+      );
+      const newSittingOut = allActive
+        .filter((p) => !playingThisRound.has(p.id))
+        .map((p) => p.id);
+
+      setSchedule(
+        schedule.map((round) =>
+          round.roundNumber === currentRound
+            ? { ...round, matches: updatedMatches, sittingOut: newSittingOut }
+            : round
+        )
+      );
+
+      setSwapTarget(null);
+      addToast(`Swapped player — scores reset`);
+    },
+    [swapTarget, currentMatch, currentRoundData, players, schedule, currentRound, setSchedule, addToast]
+  );
 
   // Get all players currently playing across all courts in current round
   const allPlayingThisRound = useMemo(() => {
@@ -615,64 +762,32 @@ export default function Home() {
                     className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-white hover:bg-[#F8FAFC] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30 touch-manipulation"
                     aria-expanded={algorithmExpanded}
                   >
-                    <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
+                    <span>Matching: {algorithmLabel(config.algorithm)} ▾</span>
                   </button>
                   {algorithmExpanded && (
                     <div className="flex flex-col gap-2 mt-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfig({ algorithm: "balanced" });
-                          if (sessionActive) {
-                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
-                            setSchedule(newSchedule);
-                          }
-                        }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                          config.algorithm === "balanced"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                        }`}
-                      >
-                        <div className="font-semibold">Balanced</div>
-                        <p className="text-xs text-[#64748B]">Balance skill levels across teams for fair matchups.</p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfig({ algorithm: "random" });
-                          if (sessionActive) {
-                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
-                            setSchedule(newSchedule);
-                          }
-                        }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                          config.algorithm === "random"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                        }`}
-                      >
-                        <div className="font-semibold">Random</div>
-                        <p className="text-xs text-[#64748B]">Fully randomized matchups, ignoring skill ratings.</p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfig({ algorithm: "king" });
-                          if (sessionActive) {
-                            const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
-                            setSchedule(newSchedule);
-                          }
-                        }}
-                        className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                          config.algorithm === "king"
-                            ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                            : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                        }`}
-                      >
-                        <div className="font-semibold">King of the Court</div>
-                        <p className="text-xs text-[#64748B]">Winning team stays on court; losing team rotates off.</p>
-                      </button>
+                      {ALGORITHM_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setConfig({ algorithm: opt.value });
+                            if (sessionActive) {
+                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: opt.value }, schedule, currentRound + 1);
+                              setSchedule(newSchedule);
+                            }
+                            setAlgorithmExpanded(false);
+                          }}
+                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                            config.algorithm === opt.value
+                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                          }`}
+                        >
+                          <div className="font-semibold">{opt.label}</div>
+                          <p className="text-xs text-[#64748B]">{opt.description}</p>
+                        </button>
+                      ))}
                     </div>
                   )}
                 </div>
@@ -800,64 +915,37 @@ export default function Home() {
                       className="w-full flex items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm font-medium text-[#1A1A1A] bg-white hover:bg-[#F8FAFC] border-2 border-[#E2E8F0] hover:border-[#2DBDA8]/30 touch-manipulation"
                       aria-expanded={algorithmExpanded}
                     >
-                      <span>Matching: {config.algorithm === "balanced" ? "Balanced" : config.algorithm === "random" ? "Random" : "King of the Court"} ▾</span>
+                      <span>Matching: {algorithmLabel(config.algorithm)} ▾</span>
                     </button>
                     {algorithmExpanded && (
                       <div className="flex flex-col gap-2 mt-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfig({ algorithm: "balanced" });
-                            if (sessionActive) {
-                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: "balanced" }, schedule, currentRound + 1);
-                              setSchedule(newSchedule);
-                            }
-                          }}
-                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                            config.algorithm === "balanced"
-                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                          }`}
-                        >
-                          <div className="font-semibold">Balanced</div>
-                          <p className="text-xs text-[#64748B]">Balance skill levels across teams for fair matchups.</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfig({ algorithm: "random" });
-                            if (sessionActive) {
-                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: "random" }, schedule, currentRound + 1);
-                              setSchedule(newSchedule);
-                            }
-                          }}
-                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                            config.algorithm === "random"
-                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                          }`}
-                        >
-                          <div className="font-semibold">Random</div>
-                          <p className="text-xs text-[#64748B]">Fully randomized matchups, ignoring skill ratings.</p>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setConfig({ algorithm: "king" });
-                            if (sessionActive) {
-                              const newSchedule = regenerateSchedule(players, { ...config, algorithm: "king" }, schedule, currentRound + 1);
-                              setSchedule(newSchedule);
-                            }
-                          }}
-                          className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
-                            config.algorithm === "king"
-                              ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
-                              : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
-                          }`}
-                        >
-                          <div className="font-semibold">King of the Court</div>
-                          <p className="text-xs text-[#64748B]">Winning team stays on court; losing team rotates off.</p>
-                        </button>
+                        {ALGORITHM_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.value}
+                            type="button"
+                            onClick={() => {
+                              const prev = config.algorithm;
+                              setConfig({ algorithm: opt.value });
+                              // Switching algorithm pre-session: clear/regenerate schedule
+                              if (!sessionActive && prev !== opt.value) {
+                                setSchedule([]);
+                              }
+                              if (sessionActive && prev !== opt.value) {
+                                const newSchedule = regenerateSchedule(players, { ...config, algorithm: opt.value }, schedule, currentRound + 1);
+                                setSchedule(newSchedule);
+                              }
+                              setAlgorithmExpanded(false);
+                            }}
+                            className={`w-full rounded-xl px-4 py-3 text-left text-sm border ${
+                              config.algorithm === opt.value
+                                ? "border-[#2DBDA8] bg-[#2DBDA8]/10 text-[#1E3A5F]"
+                                : "border-[#E2E8F0] bg-[#F1F5F9] text-[#1A1A1A]"
+                            }`}
+                          >
+                            <div className="font-semibold">{opt.label}</div>
+                            <p className="text-xs text-[#64748B]">{opt.description}</p>
+                          </button>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -960,12 +1048,17 @@ export default function Home() {
                             className="rounded border-[#E2E8F0] text-[#2DBDA8] focus:ring-[#2DBDA8]"
                           />
                           <span className="text-sm text-[#1E3A5F]">{sp.name}</span>
-                          {config.algorithm === "balanced" && (
+                          {config.algorithm === "skill_americano" && (
                             <span
                               className={`rounded-full px-1.5 h-5 flex items-center justify-center text-[10px] font-bold shrink-0 ${skillPillStyle(sp.skill).textClass}`}
                               style={{ backgroundColor: SKILL_HEX[sp.skill] }}
                             >
                               {sp.skill}
+                            </span>
+                          )}
+                          {config.algorithm === "mix_americano" && sp.gender && (
+                            <span className={`rounded-full px-1.5 h-5 flex items-center justify-center text-[10px] font-bold shrink-0 ${sp.gender === "M" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}`}>
+                              {sp.gender}
                             </span>
                           )}
                         </label>
@@ -994,7 +1087,7 @@ export default function Home() {
                   onKeyDown={(e) => e.key === "Enter" && addPlayer()}
                   className="flex-1 min-w-0 rounded-xl bg-white px-4 py-2.5 text-[#1A1A1A] placeholder-[#B0BEC5] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                 />
-                {config.algorithm === "balanced" && (
+                {config.algorithm === "skill_americano" && (
                   <div className="relative inline-flex shrink-0">
                     <span
                       className={`rounded-full pl-2.5 pr-1.5 h-7 flex items-center gap-0.5 text-sm font-bold ${skillPillStyle(newSkill).textClass}`}
@@ -1014,6 +1107,16 @@ export default function Home() {
                       ))}
                     </select>
                   </div>
+                )}
+                {config.algorithm === "mix_americano" && (
+                  <button
+                    type="button"
+                    onClick={() => setNewGender((g) => (g === "M" ? "F" : "M"))}
+                    className={`rounded-full px-3 h-7 flex items-center text-sm font-bold shrink-0 touch-manipulation ${newGender === "M" ? "bg-blue-100 text-blue-700" : "bg-pink-100 text-pink-700"}`}
+                    aria-label="Toggle gender"
+                  >
+                    {newGender}
+                  </button>
                 )}
                 <button
                   type="button"
@@ -1050,7 +1153,7 @@ export default function Home() {
                             className="w-full rounded-lg bg-white px-3 py-2 text-[#1A1A1A] border border-[#E2E8F0] focus:border-[#2DBDA8] outline-none"
                             autoFocus
                           />
-                          {config.algorithm === "balanced" && (
+                          {config.algorithm === "skill_americano" && (
                             <select
                               value={editingPlayerSkill}
                               onChange={(e) => setEditingPlayerSkill(Number(e.target.value) as 1 | 2 | 3 | 4 | 5)}
@@ -1060,6 +1163,15 @@ export default function Home() {
                                 <option key={o.value} value={o.value}>{o.label}</option>
                               ))}
                             </select>
+                          )}
+                          {config.algorithm === "mix_americano" && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingPlayerGender((g) => (g === "M" ? "F" : "M"))}
+                              className={`w-full rounded-lg px-3 py-2 text-sm font-bold border touch-manipulation ${editingPlayerGender === "M" ? "bg-blue-100 text-blue-700 border-blue-200" : "bg-pink-100 text-pink-700 border-pink-200"}`}
+                            >
+                              Gender: {editingPlayerGender === "M" ? "Male" : "Female"} (tap to toggle)
+                            </button>
                           )}
                           <div className="flex gap-2">
                             <button
@@ -1093,7 +1205,7 @@ export default function Home() {
                             )}
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0">
-                            {config.algorithm === "balanced" && (
+                            {config.algorithm === "skill_americano" && (
                               <div className="relative inline-flex shrink-0" onClick={(e) => e.stopPropagation()}>
                                 <span
                                   className={`rounded-full pl-2 pr-1 h-6 flex items-center gap-0.5 text-xs font-bold ${skillPillStyle(p.skill).textClass}`}
@@ -1117,6 +1229,16 @@ export default function Home() {
                                   ))}
                                 </select>
                               </div>
+                            )}
+                            {config.algorithm === "mix_americano" && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); togglePlayerGender(p.id); }}
+                                className={`rounded-full px-2 h-6 flex items-center text-xs font-bold shrink-0 touch-manipulation ${p.gender === "M" ? "bg-blue-100 text-blue-700" : p.gender === "F" ? "bg-pink-100 text-pink-700" : "bg-gray-100 text-gray-500"}`}
+                                aria-label={`Toggle gender for ${p.name}`}
+                              >
+                                {p.gender ?? "?"}
+                              </button>
                             )}
                             {isPaused ? (
                               <button
@@ -1288,7 +1410,7 @@ export default function Home() {
                       {/* Team A — soft sage/mint */}
                       <div
                         onClick={() => {
-                          if (!canIncrease || !match) return;
+                          if (!canIncrease || !match || swapTarget) return;
                           vibrate();
                           updateMatchScore(currentRound, match.id, {
                             teamA: Math.min(config.pointsPerMatch, scoreA + 1),
@@ -1302,17 +1424,117 @@ export default function Home() {
                             : isMatchComplete
                             ? "bg-[#E2E8F0]/50"
                             : "hover:opacity-95 active:opacity-90 transition-opacity"
-                        } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
+                        } ${!canIncrease && !swapTarget ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#1A1A1A" }}>
-                          {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
-                        </p>
-                        <div
-                          className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && teamAWon ? "text-[#2DBDA8]" : ""}`}
-                          style={!isMatchComplete || !teamAWon ? { color: "#1A1A1A" } : undefined}
-                        >
-                          {scoreA}
+                        {/* Player names with swap hint */}
+                        <div className="flex items-center justify-center gap-1.5 mb-2 px-2 w-full relative">
+                          {match.teamA.playerIds.map((id, idx) => (
+                            <span key={id} className="flex items-center">
+                              {idx > 0 && <span className="text-sm text-[#94A3B8] mx-1">&</span>}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSwapTarget(
+                                    swapTarget?.team === "A" && swapTarget?.index === idx
+                                      ? null
+                                      : { team: "A", index: idx }
+                                  );
+                                }}
+                                className={`inline-flex items-center gap-0.5 text-base font-bold break-words touch-manipulation rounded-lg px-1.5 py-0.5 transition-colors ${
+                                  swapTarget?.team === "A" && swapTarget?.index === idx
+                                    ? "bg-[#2DBDA8]/20 ring-1 ring-[#2DBDA8]"
+                                    : "hover:bg-[#2DBDA8]/10"
+                                }`}
+                                style={{ color: "#1A1A1A" }}
+                                aria-label={`Swap ${getPlayer(id)?.name}`}
+                              >
+                                {getPlayer(id)?.name}
+                                <span className="text-[10px] text-[#94A3B8] ml-0.5">⇄</span>
+                              </button>
+                            </span>
+                          ))}
+                          {/* Swap dropdown for Team A */}
+                          {swapTarget?.team === "A" && (
+                            <div
+                              className="absolute top-full left-1/2 -translate-x-1/2 mt-1 z-30 w-56 max-h-48 overflow-y-auto rounded-xl bg-white border border-[#E2E8F0] shadow-lg py-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {swapCandidates.length === 0 ? (
+                                <p className="px-3 py-2 text-sm text-[#94A3B8] text-center">No available players</p>
+                              ) : (
+                                swapCandidates.map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => handlePlayerSwap(p.id)}
+                                    className="w-full text-left px-3 py-2 text-sm text-[#1A1A1A] hover:bg-[#2DBDA8]/10 active:bg-[#2DBDA8]/20 touch-manipulation transition-colors"
+                                  >
+                                    {p.name}
+                                    {p.gender && config.algorithm === "mix_americano" && (
+                                      <span className={`ml-1.5 text-[10px] font-bold ${p.gender === "M" ? "text-blue-500" : "text-pink-500"}`}>{p.gender}</span>
+                                    )}
+                                    {config.algorithm === "skill_americano" && (
+                                      <span className="ml-1.5 text-[10px] font-bold text-[#64748B]">Skill {p.skill}</span>
+                                    )}
+                                  </button>
+                                ))
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setSwapTarget(null)}
+                                className="w-full text-center px-3 py-1.5 text-xs text-[#94A3B8] hover:text-[#64748B] border-t border-[#E2E8F0] mt-1"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
                         </div>
+                        {directScoreEditing === "A" ? (
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={config.pointsPerMatch}
+                            autoFocus
+                            value={directScoreValue}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setDirectScoreValue(e.target.value)}
+                            onBlur={() => {
+                              const val = Math.max(0, Math.min(config.pointsPerMatch, parseInt(directScoreValue) || 0));
+                              // Clamp so teamA + teamB <= max
+                              const clampedA = Math.min(val, config.pointsPerMatch - scoreB);
+                              updateMatchScore(currentRound, match.id, { teamA: clampedA, teamB: scoreB });
+                              setDirectScoreEditing(null);
+                              setDirectScoreValue("");
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              if (e.key === "Escape") { setDirectScoreEditing(null); setDirectScoreValue(""); }
+                            }}
+                            className="w-24 text-center text-[56px] sm:text-[72px] font-bold leading-none bg-white/80 border-b-2 border-[#2DBDA8] rounded-lg outline-none"
+                            style={{ color: "#1A1A1A" }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDirectScoreEditing("A");
+                              setDirectScoreValue(scoreA.toString());
+                            }}
+                            className="relative group"
+                            aria-label="Edit score directly"
+                          >
+                            <div
+                              className={`text-[56px] sm:text-[72px] font-bold leading-none border-b-2 border-dashed border-[#2DBDA8]/40 group-hover:border-[#2DBDA8] transition-colors ${isMatchComplete && teamAWon ? "text-[#2DBDA8]" : ""}`}
+                              style={!isMatchComplete || !teamAWon ? { color: "#1A1A1A" } : undefined}
+                            >
+                              {scoreA}
+                            </div>
+                            <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-[#94A3B8] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">tap to edit</span>
+                          </button>
+                        )}
                         {isMatchComplete && teamAWon && (
                           <p className="mt-2 text-base font-bold text-[#2DBDA8]">🏆 Winner!</p>
                         )}
@@ -1338,7 +1560,7 @@ export default function Home() {
                       {/* Team B — light blue tint */}
                       <div
                         onClick={() => {
-                          if (!canIncrease || !match) return;
+                          if (!canIncrease || !match || swapTarget) return;
                           vibrate();
                           updateMatchScore(currentRound, match.id, {
                             teamA: scoreA,
@@ -1352,17 +1574,117 @@ export default function Home() {
                             : isMatchComplete
                             ? "bg-[#E2E8F0]/50"
                             : "hover:opacity-95 active:opacity-90 transition-opacity"
-                        } ${!canIncrease ? "opacity-60 cursor-not-allowed" : ""}`}
+                        } ${!canIncrease && !swapTarget ? "opacity-60 cursor-not-allowed" : ""}`}
                       >
-                        <p className="text-base font-bold mb-2 text-center px-2 break-words min-w-0 w-full" style={{ color: "#1A1A1A" }}>
-                          {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
-                        </p>
-                        <div
-                          className={`text-[56px] sm:text-[72px] font-bold leading-none ${isMatchComplete && !teamAWon ? "text-[#2DBDA8]" : ""}`}
-                          style={!isMatchComplete || teamAWon ? { color: "#1A1A1A" } : undefined}
-                        >
-                          {scoreB}
+                        {/* Player names with swap hint */}
+                        <div className="flex items-center justify-center gap-1.5 mb-2 px-2 w-full relative">
+                          {match.teamB.playerIds.map((id, idx) => (
+                            <span key={id} className="flex items-center">
+                              {idx > 0 && <span className="text-sm text-[#94A3B8] mx-1">&</span>}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSwapTarget(
+                                    swapTarget?.team === "B" && swapTarget?.index === idx
+                                      ? null
+                                      : { team: "B", index: idx }
+                                  );
+                                }}
+                                className={`inline-flex items-center gap-0.5 text-base font-bold break-words touch-manipulation rounded-lg px-1.5 py-0.5 transition-colors ${
+                                  swapTarget?.team === "B" && swapTarget?.index === idx
+                                    ? "bg-[#2DBDA8]/20 ring-1 ring-[#2DBDA8]"
+                                    : "hover:bg-[#2DBDA8]/10"
+                                }`}
+                                style={{ color: "#1A1A1A" }}
+                                aria-label={`Swap ${getPlayer(id)?.name}`}
+                              >
+                                {getPlayer(id)?.name}
+                                <span className="text-[10px] text-[#94A3B8] ml-0.5">⇄</span>
+                              </button>
+                            </span>
+                          ))}
+                          {/* Swap dropdown for Team B */}
+                          {swapTarget?.team === "B" && (
+                            <div
+                              className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 z-30 w-56 max-h-48 overflow-y-auto rounded-xl bg-white border border-[#E2E8F0] shadow-lg py-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {swapCandidates.length === 0 ? (
+                                <p className="px-3 py-2 text-sm text-[#94A3B8] text-center">No available players</p>
+                              ) : (
+                                swapCandidates.map((p) => (
+                                  <button
+                                    key={p.id}
+                                    type="button"
+                                    onClick={() => handlePlayerSwap(p.id)}
+                                    className="w-full text-left px-3 py-2 text-sm text-[#1A1A1A] hover:bg-[#2DBDA8]/10 active:bg-[#2DBDA8]/20 touch-manipulation transition-colors"
+                                  >
+                                    {p.name}
+                                    {p.gender && config.algorithm === "mix_americano" && (
+                                      <span className={`ml-1.5 text-[10px] font-bold ${p.gender === "M" ? "text-blue-500" : "text-pink-500"}`}>{p.gender}</span>
+                                    )}
+                                    {config.algorithm === "skill_americano" && (
+                                      <span className="ml-1.5 text-[10px] font-bold text-[#64748B]">Skill {p.skill}</span>
+                                    )}
+                                  </button>
+                                ))
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setSwapTarget(null)}
+                                className="w-full text-center px-3 py-1.5 text-xs text-[#94A3B8] hover:text-[#64748B] border-t border-[#E2E8F0] mt-1"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          )}
                         </div>
+                        {directScoreEditing === "B" ? (
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min={0}
+                            max={config.pointsPerMatch}
+                            autoFocus
+                            value={directScoreValue}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => setDirectScoreValue(e.target.value)}
+                            onBlur={() => {
+                              const val = Math.max(0, Math.min(config.pointsPerMatch, parseInt(directScoreValue) || 0));
+                              // Clamp so teamA + teamB <= max
+                              const clampedB = Math.min(val, config.pointsPerMatch - scoreA);
+                              updateMatchScore(currentRound, match.id, { teamA: scoreA, teamB: clampedB });
+                              setDirectScoreEditing(null);
+                              setDirectScoreValue("");
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                              if (e.key === "Escape") { setDirectScoreEditing(null); setDirectScoreValue(""); }
+                            }}
+                            className="w-24 text-center text-[56px] sm:text-[72px] font-bold leading-none bg-white/80 border-b-2 border-[#2DBDA8] rounded-lg outline-none"
+                            style={{ color: "#1A1A1A" }}
+                          />
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDirectScoreEditing("B");
+                              setDirectScoreValue(scoreB.toString());
+                            }}
+                            className="relative group"
+                            aria-label="Edit score directly"
+                          >
+                            <div
+                              className={`text-[56px] sm:text-[72px] font-bold leading-none border-b-2 border-dashed border-[#2DBDA8]/40 group-hover:border-[#2DBDA8] transition-colors ${isMatchComplete && !teamAWon ? "text-[#2DBDA8]" : ""}`}
+                              style={!isMatchComplete || teamAWon ? { color: "#1A1A1A" } : undefined}
+                            >
+                              {scoreB}
+                            </div>
+                            <span className="absolute -bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-[#94A3B8] opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">tap to edit</span>
+                          </button>
+                        )}
                         {isMatchComplete && !teamAWon && (
                           <p className="mt-2 text-base font-bold text-[#2DBDA8]">🏆 Winner!</p>
                         )}
@@ -1417,6 +1739,13 @@ export default function Home() {
                                 (m) => m.status === "completed" || m.id === currentMatch.id
                               );
                               if (allComplete && currentRound < config.rounds) {
+                                // For Mexicano: regenerate next round based on current standings
+                                if (config.algorithm === "mexicano") {
+                                  const latestPlayers = useStore.getState().players;
+                                  const latestSchedule = useStore.getState().schedule;
+                                  const newSchedule = regenerateSchedule(latestPlayers, config, latestSchedule, currentRound + 1);
+                                  setSchedule(newSchedule);
+                                }
                                 setCurrentRound(currentRound + 1);
                                 setSelectedCourt(1);
                               }
@@ -1432,36 +1761,33 @@ export default function Home() {
                               if (!currentMatch || !currentRoundData) return;
                               const confirmed = window.confirm("Reshuffle with available players? (Paused players are excluded.)");
                               if (!confirmed) return;
-                              // Pool = all active players except those playing on other courts this round (includes mid-session joiners)
-                              const activePlayers = players.filter((p) => p.status === "active");
+                              // Pool = all active players except those playing on other courts this round
+                              const activePlayersAll = players.filter((p) => p.status === "active");
                               const playingOnOtherCourts = new Set(
                                 currentRoundData.matches
                                   .filter((m) => m.court !== selectedCourt)
                                   .flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
                               );
-                              const pool = activePlayers
-                                .filter((p) => !playingOnOtherCourts.has(p.id))
-                                .map((p) => p.id);
-                              if (pool.length < 4) {
+                              const poolPlayers = activePlayersAll.filter((p) => !playingOnOtherCourts.has(p.id));
+                              if (poolPlayers.length < 4) {
                                 window.alert("Not enough active players to reshuffle (need 4). Unpause players or add more.");
                                 return;
                               }
-                              const shuffled = [...pool].sort(() => Math.random() - 0.5);
-                              const four = shuffled.slice(0, 4);
-                              const newMatch = {
-                                ...currentMatch,
-                                teamA: { playerIds: [four[0], four[1]] },
-                                teamB: { playerIds: [four[2], four[3]] },
-                                status: "upcoming" as const,
-                                score: undefined,
-                              };
+                              // Use algorithm-aware reshuffle
+                              const previousRounds = schedule.filter((r) => r.roundNumber < currentRound);
+                              const reshuffled = reshuffleMatch(players, config.algorithm, poolPlayers, selectedCourt, previousRounds);
+                              if (!reshuffled) {
+                                window.alert("Could not generate a valid match. Try adding more players.");
+                                return;
+                              }
+                              const newMatch = reshuffled;
                               const updatedMatches = currentRoundData.matches.map((m) =>
                                 m.court === selectedCourt ? newMatch : m
                               );
                               const playingThisRound = new Set(
                                 updatedMatches.flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds])
                               );
-                              const newSittingOut = activePlayers.filter((p) => !playingThisRound.has(p.id)).map((p) => p.id);
+                              const newSittingOut = activePlayersAll.filter((p) => !playingThisRound.has(p.id)).map((p) => p.id);
                               setSchedule(
                                 schedule.map((round) =>
                                   round.roundNumber === currentRound
@@ -1595,52 +1921,59 @@ export default function Home() {
                               {isPast && <span className="text-xs font-normal text-[#94A3B8]">(played)</span>}
                             </h3>
                             <div className="space-y-3">
-                              {courtsToShow.map((courtId) => {
-                                const match = matchesByCourt.get(courtId);
-                                if (!match) return null;
-                                const score = match.score;
-                                const isComplete = match.status === "completed";
-                                const teamAWon = score && score.teamA > score.teamB;
-                                const teamClass = (winner: boolean) =>
-                                  isFuture
-                                    ? "font-normal text-[#94A3B8]"
-                                    : isPast
-                                    ? winner ? "font-bold text-[#64748B]" : "font-normal text-[#64748B]"
-                                    : winner ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1A1A1A]";
-                                return (
-                                  <div key={match.id} className={`text-sm space-y-1 pl-2 border-l-2 ${isFuture ? "border-[#E2E8F0]/60" : "border-[#E2E8F0]"}`}>
-                                    <div className={`font-medium text-xs ${courtLabelColor}`}>Court {courtId}</div>
-                                    <div className="flex flex-wrap items-center gap-2">
-                                      <span className={`flex items-center gap-1.5 ${teamClass(!!(isComplete && teamAWon))}`}>
-                                        {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
-                                        {isComplete && teamAWon && (
-                                          <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
-                                        )}
-                                      </span>
-                                      <span className={vsColor}>vs</span>
-                                      <span className={`flex items-center gap-1.5 ${teamClass(!!(isComplete && !teamAWon))}`}>
-                                        {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
-                                        {isComplete && !teamAWon && (
-                                          <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
-                                        )}
-                                      </span>
-                                    </div>
-                                    {score && (
-                                      <div className="pt-1">
-                                        <p className={`text-base font-semibold ${isPast ? "text-[#64748B]" : ""}`}>
-                                          <span className={teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
-                                            {score.teamA}
-                                          </span>
-                                          <span className="text-[#94A3B8] mx-2">-</span>
-                                          <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
-                                            {score.teamB}
-                                          </span>
-                                        </p>
+                              {/* Mexicano future round: show placeholder instead of player names */}
+                              {isFuture && isMexicanoFutureRound(config.algorithm, round.roundNumber, schedule) ? (
+                                <p className="text-sm italic text-[#94A3B8] pl-2">
+                                  Matchups determined by standings
+                                </p>
+                              ) : (
+                                courtsToShow.map((courtId) => {
+                                  const match = matchesByCourt.get(courtId);
+                                  if (!match) return null;
+                                  const score = match.score;
+                                  const isComplete = match.status === "completed";
+                                  const teamAWon = score && score.teamA > score.teamB;
+                                  const teamClass = (winner: boolean) =>
+                                    isFuture
+                                      ? "font-normal text-[#94A3B8]"
+                                      : isPast
+                                      ? winner ? "font-bold text-[#64748B]" : "font-normal text-[#64748B]"
+                                      : winner ? "font-bold text-[#1E3A5F]" : "font-normal text-[#1A1A1A]";
+                                  return (
+                                    <div key={match.id} className={`text-sm space-y-1 pl-2 border-l-2 ${isFuture ? "border-[#E2E8F0]/60" : "border-[#E2E8F0]"}`}>
+                                      <div className={`font-medium text-xs ${courtLabelColor}`}>Court {courtId}</div>
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span className={`flex items-center gap-1.5 ${teamClass(!!(isComplete && teamAWon))}`}>
+                                          {match.teamA.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                          {isComplete && teamAWon && (
+                                            <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
+                                          )}
+                                        </span>
+                                        <span className={vsColor}>vs</span>
+                                        <span className={`flex items-center gap-1.5 ${teamClass(!!(isComplete && !teamAWon))}`}>
+                                          {match.teamB.playerIds.map((id) => getPlayer(id)?.name).join(" & ")}
+                                          {isComplete && !teamAWon && (
+                                            <span className="inline-flex items-center rounded-full bg-[#2DBDA8] text-white text-[10px] font-semibold px-1.5 py-0.5" aria-label="Winner">🏆</span>
+                                          )}
+                                        </span>
                                       </div>
-                                    )}
-                                  </div>
-                                );
-                              })}
+                                      {score && (
+                                        <div className="pt-1">
+                                          <p className={`text-base font-semibold ${isPast ? "text-[#64748B]" : ""}`}>
+                                            <span className={teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
+                                              {score.teamA}
+                                            </span>
+                                            <span className="text-[#94A3B8] mx-2">-</span>
+                                            <span className={!teamAWon ? "text-[#2DBDA8]" : "text-[#94A3B8]"}>
+                                              {score.teamB}
+                                            </span>
+                                          </p>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })
+                              )}
                             </div>
                             {round.sittingOut.length > 0 && (
                               <p className="text-[11px] italic text-[#94A3B8] mt-3 pt-2 border-t border-[#E2E8F0]/70">

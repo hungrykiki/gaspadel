@@ -2,20 +2,23 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type SkillLevel = 1 | 2 | 3 | 4 | 5;
+export type Gender = "M" | "F" | null;
 export type PlayerStatus = "active" | "paused" | "sitting_out" | "removed";
-export type Algorithm = "balanced" | "random" | "king";
+export type Algorithm = "americano" | "mexicano" | "mix_americano" | "skill_americano";
 export type MatchStatus = "upcoming" | "in_progress" | "completed";
 
 export interface SavedPlayer {
   id: string;
   name: string;
   skill: SkillLevel;
+  gender: Gender;
 }
 
 export interface Player {
   id: string;
   name: string;
   skill: SkillLevel;
+  gender: Gender;
   status: PlayerStatus;
   joinedAtRound: number; // which round they entered
   pausedAt?: number; // which round they were paused (if paused)
@@ -77,7 +80,7 @@ export interface AppState {
 
   // Actions
   setConfig: (config: Partial<Config>) => void;
-  addPlayer: (name: string, skill: SkillLevel) => void;
+  addPlayer: (name: string, skill: SkillLevel, gender?: Gender) => void;
   removePlayer: (id: string) => void;
   pausePlayer: (id: string) => void;
   resumePlayer: (id: string) => void;
@@ -108,7 +111,7 @@ export const useStore = create<AppState>()(
         courts: 1,
         pointsPerMatch: 21,
         rounds: 10,
-        algorithm: "balanced",
+        algorithm: "skill_americano",
       },
       players: [],
       savedRoster: [],
@@ -123,10 +126,12 @@ export const useStore = create<AppState>()(
           config: { ...state.config, ...updates },
         })),
 
-      addPlayer: (name, skill) => {
+      addPlayer: (name, skill, gender) => {
         const state = get();
         const currentRound = state.sessionActive ? state.currentRound : 0;
         const trimmedName = name.trim();
+        // Resolve gender: use provided value, or default based on algorithm
+        const resolvedGender: Gender = gender !== undefined ? gender : (state.config.algorithm === "mix_americano" ? "M" : null);
         // If same name exists as a removed player, reactivate them instead of creating duplicate
         const removedMatch = state.players.find(
           (p) => p.status === "removed" && p.name === trimmedName
@@ -139,6 +144,7 @@ export const useStore = create<AppState>()(
                     ...p,
                     status: "active" as PlayerStatus,
                     skill,
+                    gender: resolvedGender,
                     joinedAtRound: currentRound,
                   }
                 : p
@@ -160,6 +166,7 @@ export const useStore = create<AppState>()(
           id: generateId(),
           name: finalName,
           skill,
+          gender: resolvedGender,
           status: "active",
           joinedAtRound: currentRound,
           sitOutCount: 0,
@@ -173,7 +180,7 @@ export const useStore = create<AppState>()(
           // Automatically add to saved roster for returning users
           savedRoster: state.savedRoster.some((sp) => sp.id === newPlayer.id)
             ? state.savedRoster
-            : [...state.savedRoster, { id: newPlayer.id, name: newPlayer.name, skill: newPlayer.skill }],
+            : [...state.savedRoster, { id: newPlayer.id, name: newPlayer.name, skill: newPlayer.skill, gender: newPlayer.gender }],
         }));
       },
 
@@ -211,10 +218,10 @@ export const useStore = create<AppState>()(
       updatePlayer: (id, updates) =>
         set((state) => ({
           players: state.players.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-          // Update saved roster if name or skill changed
+          // Update saved roster if name, skill, or gender changed
           savedRoster: state.savedRoster.map((sp) =>
-            sp.id === id && (updates.name || updates.skill)
-              ? { ...sp, name: updates.name ?? sp.name, skill: updates.skill ?? sp.skill }
+            sp.id === id && (updates.name || updates.skill || updates.gender !== undefined)
+              ? { ...sp, name: updates.name ?? sp.name, skill: updates.skill ?? sp.skill, gender: updates.gender !== undefined ? updates.gender : sp.gender }
               : sp
           ),
         })),
@@ -246,6 +253,7 @@ export const useStore = create<AppState>()(
                       ...p,
                       status: "active" as PlayerStatus,
                       skill: savedPlayer.skill,
+                      gender: savedPlayer.gender ?? null,
                       joinedAtRound: currentRound,
                       pausedAt: undefined,
                     }
@@ -260,6 +268,7 @@ export const useStore = create<AppState>()(
           id: savedPlayer.id,
           name: savedPlayer.name,
           skill: savedPlayer.skill,
+          gender: savedPlayer.gender ?? null,
           status: "active",
           joinedAtRound: currentRound,
           sitOutCount: 0,
@@ -277,7 +286,7 @@ export const useStore = create<AppState>()(
         set({
           sessionActive: true,
           currentRound: 1,
-          // Reset leaderboard stats for every new session; roster stays, scores don’t carry over
+          // Reset leaderboard stats for every new session; roster stays, scores don't carry over
           players: (get().players || [])
             .filter((p) => p.status !== "removed")
             .map((p) => ({

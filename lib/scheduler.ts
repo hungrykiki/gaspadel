@@ -1,39 +1,23 @@
-import { Player, Round, Match, Algorithm } from "./store";
+import { Player, Round, Match, Algorithm, Config } from "./store";
 
-/**
- * Generate a unique match ID (exported for creating matches when adding courts mid-session)
- */
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
 export function generateMatchId(): string {
   return Math.random().toString(36).slice(2, 11);
 }
 
-/**
- * Get skill label for display
- */
 export function getSkillLabel(skill: number): string {
   switch (skill) {
-    case 1:
-      return "Newbie";
-    case 2:
-      return "Beginner";
-    case 3:
-      return "Intermediate";
-    case 4:
-      return "Advanced";
-    case 5:
-      return "Pro";
-    default:
-      return "Intermediate";
+    case 1: return "Newbie";
+    case 2: return "Beginner";
+    case 3: return "Intermediate";
+    case 4: return "Advanced";
+    case 5: return "Pro";
+    default: return "Intermediate";
   }
 }
 
-/**
- * Get unique player name (adds number suffix if duplicate)
- */
-export function getUniquePlayerName(
-  baseName: string,
-  existingPlayers: { name: string }[]
-): string {
+export function getUniquePlayerName(baseName: string, existingPlayers: { name: string }[]): string {
   const names = new Set(existingPlayers.map((p) => p.name));
   if (!names.has(baseName)) return baseName;
   let n = 2;
@@ -41,354 +25,560 @@ export function getUniquePlayerName(
   return `${baseName} (${n})`;
 }
 
-/**
- * Calculate diversity score for a pairing
- * Lower score = better diversity (fewer repeat partners/opponents)
- */
-function calculatePairingScore(
-  teamA: string[],
-  teamB: string[],
-  partnerHistory: Map<string, Set<string>>,
-  opponentHistory: Map<string, Set<string>>,
-  courtHistory: Map<string, number>,
-  targetCourt: number
-): number {
-  let score = 0;
-  
-  // Penalize repeat partners within teamA
-  for (let i = 0; i < teamA.length; i++) {
-    for (let j = i + 1; j < teamA.length; j++) {
-      const partners = partnerHistory.get(teamA[i]);
-      if (partners?.has(teamA[j])) {
-        score += 10; // Heavy penalty for repeat partners
-      }
-    }
+/** Shuffle array in place using Fisher-Yates */
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
   }
-  
-  // Penalize repeat partners within teamB
-  for (let i = 0; i < teamB.length; i++) {
-    for (let j = i + 1; j < teamB.length; j++) {
-      const partners = partnerHistory.get(teamB[i]);
-      if (partners?.has(teamB[j])) {
-        score += 10; // Heavy penalty for repeat partners
-      }
-    }
-  }
-  
-  // Penalize repeat opponents
-  for (const idA of teamA) {
-    for (const idB of teamB) {
-      const opponents = opponentHistory.get(idA);
-      if (opponents?.has(idB)) {
-        score += 5; // Moderate penalty for repeat opponents
-      }
-    }
-  }
-  
-  // Penalize staying on same court
-  for (const id of [...teamA, ...teamB]) {
-    const lastCourt = courtHistory.get(id);
-    if (lastCourt === targetCourt) {
-      score += 8; // Heavy penalty for same court
-    }
-  }
-  
-  return score;
+  return a;
 }
 
-/**
- * Generate optimal pairing for 4 players considering diversity
- */
-function generateOptimalPairing(
-  players: Player[],
-  algorithm: Algorithm,
-  partnerHistory: Map<string, Set<string>>,
-  opponentHistory: Map<string, Set<string>>,
-  courtHistory: Map<string, number>,
-  targetCourt: number
-): { teamA: string[]; teamB: string[] } {
-  const playerIds = players.map((p) => p.id);
-  
-  if (algorithm === "random") {
-    // Random pairing but still try to avoid repeats
-    const shuffled = [...playerIds].sort(() => Math.random() - 0.5);
-    return {
-      teamA: [shuffled[0], shuffled[1]],
-      teamB: [shuffled[2], shuffled[3]],
-    };
-  }
-  
-  if (algorithm === "king") {
-    // King of the Court: prioritize players with fewer games
-    const sorted = [...players].sort((a, b) => a.gamesPlayed - b.gamesPlayed);
-    return {
-      teamA: [sorted[0].id, sorted[1].id],
-      teamB: [sorted[2].id, sorted[3].id],
-    };
-  }
-  
-  // Balanced: try multiple pairings and pick the best one
-  const sorted = [...players].sort((a, b) => b.skill - a.skill);
-  
-  // Try different pairings
-  const candidates: { teamA: string[]; teamB: string[]; score: number }[] = [];
-  
-  // Option 1: High+Low vs Mid+Mid (default balanced)
-  const option1 = {
-    teamA: [sorted[0].id, sorted[3].id],
-    teamB: [sorted[1].id, sorted[2].id],
-  };
-  candidates.push({
-    ...option1,
-    score: calculatePairingScore(option1.teamA, option1.teamB, partnerHistory, opponentHistory, courtHistory, targetCourt),
-  });
-  
-  // Option 2: High+Mid vs Low+Mid (alternative balanced)
-  const option2 = {
-    teamA: [sorted[0].id, sorted[2].id],
-    teamB: [sorted[1].id, sorted[3].id],
-  };
-  candidates.push({
-    ...option2,
-    score: calculatePairingScore(option2.teamA, option2.teamB, partnerHistory, opponentHistory, courtHistory, targetCourt),
-  });
-  
-  // Option 3: High+Mid vs Low+Mid (swapped)
-  const option3 = {
-    teamA: [sorted[0].id, sorted[1].id],
-    teamB: [sorted[2].id, sorted[3].id],
-  };
-  candidates.push({
-    ...option3,
-    score: calculatePairingScore(option3.teamA, option3.teamB, partnerHistory, opponentHistory, courtHistory, targetCourt),
-  });
-  
-  // Pick the pairing with the lowest score (best diversity)
-  candidates.sort((a, b) => a.score - b.score);
-  return { teamA: candidates[0].teamA, teamB: candidates[0].teamB };
+/** Make a pair key (order-independent) */
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}_${b}` : `${b}_${a}`;
 }
 
-/**
- * Generate matchups for a single round
- * Players rotate across ALL courts - no player stays on the same court consecutive rounds
- * Maximizes partner diversity, opponent diversity, and court rotation
- */
-export function generateRoundMatchups(
-  players: Player[],
-  courts: number,
-  algorithm: Algorithm,
-  previousRounds: Round[] = [],
-  currentRound: number = 1
-): { matches: Match[]; sittingOut: string[] } {
-  // Filter to active players only (exclude paused, removed, and sitting_out)
-  const activePlayers = players.filter((p) => p.status === "active");
+/** Make a matchup key for 4 players (order-independent) to detect repeat matchups */
+function matchupKey(ids: string[]): string {
+  return [...ids].sort().join("_");
+}
 
-  if (activePlayers.length < 4) {
-    return {
-      matches: [],
-      sittingOut: activePlayers.map((p) => p.id),
-    };
-  }
+// ─── History tracking ────────────────────────────────────────────────────────
 
-  const matches: Match[] = [];
-  const playersNeeded = courts * 4;
-  const playersToUse = [...activePlayers];
+interface HistoryMaps {
+  partnerCount: Map<string, number>;   // pairKey -> count of times partnered
+  opponentCount: Map<string, number>;  // pairKey -> count of times faced
+  matchupSet: Set<string>;             // set of 4-player matchup keys already played
+  sitOutCounts: Map<string, number>;   // playerId -> sit-out count
+}
 
-  // Track partner/opponent/court history from previous rounds
-  const partnerHistory = new Map<string, Set<string>>();
-  const opponentHistory = new Map<string, Set<string>>();
-  const courtHistory = new Map<string, number>(); // Last court each player was on
-  const sitOutCounts = new Map<string, number>(); // How many times each player sat out
+/** Build history maps from completed/scheduled rounds */
+function buildHistory(players: Player[], rounds: Round[]): HistoryMaps {
+  const partnerCount = new Map<string, number>();
+  const opponentCount = new Map<string, number>();
+  const matchupSet = new Set<string>();
+  const sitOutCounts = new Map<string, number>();
 
-  // Initialize history maps
-  activePlayers.forEach((p) => {
-    partnerHistory.set(p.id, new Set());
-    opponentHistory.set(p.id, new Set());
-    sitOutCounts.set(p.id, p.sitOutCount || 0);
-  });
+  // Init sit-out counts from player data
+  players.forEach((p) => sitOutCounts.set(p.id, p.sitOutCount || 0));
 
-  // Build history from previous rounds
-  previousRounds.forEach((round) => {
+  rounds.forEach((round) => {
     round.matches.forEach((match) => {
-      const court = match.court;
-      
-      // Track partners
-      match.teamA.playerIds.forEach((id1) => {
-        match.teamA.playerIds.forEach((id2) => {
-          if (id1 !== id2) {
-            partnerHistory.get(id1)?.add(id2);
-          }
-        });
-        courtHistory.set(id1, court);
-      });
-      
-      match.teamB.playerIds.forEach((id1) => {
-        match.teamB.playerIds.forEach((id2) => {
-          if (id1 !== id2) {
-            partnerHistory.get(id1)?.add(id2);
-          }
-        });
-        courtHistory.set(id1, court);
-      });
+      const aIds = match.teamA.playerIds;
+      const bIds = match.teamB.playerIds;
 
-      // Track opponents
-      match.teamA.playerIds.forEach((id1) => {
-        match.teamB.playerIds.forEach((id2) => {
-          opponentHistory.get(id1)?.add(id2);
-          opponentHistory.get(id2)?.add(id1);
-        });
-      });
+      // Track partners within each team
+      for (let i = 0; i < aIds.length; i++) {
+        for (let j = i + 1; j < aIds.length; j++) {
+          const k = pairKey(aIds[i], aIds[j]);
+          partnerCount.set(k, (partnerCount.get(k) || 0) + 1);
+        }
+      }
+      for (let i = 0; i < bIds.length; i++) {
+        for (let j = i + 1; j < bIds.length; j++) {
+          const k = pairKey(bIds[i], bIds[j]);
+          partnerCount.set(k, (partnerCount.get(k) || 0) + 1);
+        }
+      }
+
+      // Track opponents (cross-team)
+      for (const a of aIds) {
+        for (const b of bIds) {
+          const k = pairKey(a, b);
+          opponentCount.set(k, (opponentCount.get(k) || 0) + 1);
+        }
+      }
+
+      // Track exact matchups
+      matchupSet.add(matchupKey([...aIds, ...bIds]));
     });
-    
+
     // Track sit-outs
     round.sittingOut.forEach((id) => {
       sitOutCounts.set(id, (sitOutCounts.get(id) || 0) + 1);
     });
   });
 
-  // Track who played in recent rounds for rest rules
-  const playedLastRound = new Set<string>();
-  const playedTwoRoundsAgo = new Set<string>();
+  return { partnerCount, opponentCount, matchupSet, sitOutCounts };
+}
 
-  if (previousRounds.length > 0) {
-    const lastRound = previousRounds[previousRounds.length - 1];
-    lastRound.matches.forEach((match) => {
-      match.teamA.playerIds.forEach((id) => playedLastRound.add(id));
-      match.teamB.playerIds.forEach((id) => playedLastRound.add(id));
-    });
+// ─── Player selection (shared across all algorithms) ─────────────────────────
+
+/**
+ * Select which players play this round and who sits out.
+ * Rules:
+ * - Paused/removed players excluded
+ * - Player with fewest gamesPlayed sits out (fair rotation)
+ * - Late joiners get priority until their match count catches up
+ */
+function selectPlayersForRound(
+  players: Player[],
+  courts: number,
+  history: HistoryMaps,
+): { playing: Player[]; sittingOut: string[] } {
+  const active = players.filter((p) => p.status === "active");
+  const playersNeeded = courts * 4;
+
+  if (active.length <= playersNeeded) {
+    // Everyone plays (or not enough players — some courts may be empty)
+    return { playing: active, sittingOut: [] };
   }
 
-  if (previousRounds.length > 1) {
-    const twoRoundsAgo = previousRounds[previousRounds.length - 2];
-    twoRoundsAgo.matches.forEach((match) => {
-      match.teamA.playerIds.forEach((id) => playedTwoRoundsAgo.add(id));
-      match.teamB.playerIds.forEach((id) => playedTwoRoundsAgo.add(id));
-    });
-  }
-
-  // Determine who must sit out (rest rule: no more than 2 consecutive rounds)
-  const mustSitOut = new Set<string>();
-  playedLastRound.forEach((id) => {
-    if (playedTwoRoundsAgo.has(id)) mustSitOut.add(id);
+  // Sort by: lowest gamesPlayed first (late joiners naturally have fewer),
+  // then by highest sitOutCount (sat out more = higher priority to play)
+  const sorted = [...active].sort((a, b) => {
+    const gDiff = a.gamesPlayed - b.gamesPlayed;
+    if (gDiff !== 0) return gDiff;
+    const sDiff = (history.sitOutCounts.get(b.id) || 0) - (history.sitOutCounts.get(a.id) || 0);
+    if (sDiff !== 0) return sDiff;
+    return Math.random() - 0.5; // Break ties randomly
   });
 
-  // Score players for selection (lower = higher priority)
-  // Prioritize: players who sat out more, haven't played recently, have fewer games
-  const playerScores = playersToUse.map((p) => {
-    let score = 0;
-    score -= (sitOutCounts.get(p.id) || 0) * 100; // Prioritize those who sat out more
-    score -= p.gamesPlayed * 10; // Prioritize those with fewer games
-    if (playedLastRound.has(p.id)) score += 50; // Deprioritize those who played last round
-    if (mustSitOut.has(p.id)) score += 200; // Heavy penalty for must-sit-out
-    return { player: p, score };
+  const playing = sorted.slice(0, playersNeeded);
+  const sittingOut = sorted.slice(playersNeeded).map((p) => p.id);
+  return { playing, sittingOut };
+}
+
+// ─── Americano algorithm ─────────────────────────────────────────────────────
+
+/**
+ * Score a candidate pairing of 4 players into 2 teams.
+ * Lower is better: minimizes max partner/opponent history, avoids repeat matchups.
+ */
+function scoreAmericanoPairing(
+  teamA: [string, string],
+  teamB: [string, string],
+  history: HistoryMaps,
+): number {
+  let score = 0;
+
+  // Partner penalty (team A pair)
+  const pkA = pairKey(teamA[0], teamA[1]);
+  score += (history.partnerCount.get(pkA) || 0) * 10;
+
+  // Partner penalty (team B pair)
+  const pkB = pairKey(teamB[0], teamB[1]);
+  score += (history.partnerCount.get(pkB) || 0) * 10;
+
+  // Opponent penalty (cross-team)
+  for (const a of teamA) {
+    for (const b of teamB) {
+      score += (history.opponentCount.get(pairKey(a, b)) || 0) * 5;
+    }
+  }
+
+  // Exact matchup repeat penalty
+  if (history.matchupSet.has(matchupKey([...teamA, ...teamB]))) {
+    score += 1000;
+  }
+
+  return score;
+}
+
+/**
+ * Generate best pairing for 4 players using Americano diversity logic.
+ * Tries all 3 possible 2v2 splits and picks the one with lowest score.
+ */
+function bestAmericanoPairing(
+  fourIds: string[],
+  history: HistoryMaps,
+): { teamA: string[]; teamB: string[] } {
+  const [a, b, c, d] = fourIds;
+  // All 3 possible 2v2 splits
+  const splits: [string, string, string, string][] = [
+    [a, b, c, d], // AB vs CD
+    [a, c, b, d], // AC vs BD
+    [a, d, b, c], // AD vs BC
+  ];
+
+  let best = { teamA: [a, b], teamB: [c, d] };
+  let bestScore = Infinity;
+
+  for (const [x1, x2, y1, y2] of splits) {
+    const s = scoreAmericanoPairing([x1, x2], [y1, y2], history);
+    if (s < bestScore) {
+      bestScore = s;
+      best = { teamA: [x1, x2], teamB: [y1, y2] };
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Assign players to courts for a round (Americano / generic).
+ * Groups of 4 are assigned with diversity optimization.
+ */
+function generateAmericanoRound(
+  playing: Player[],
+  courts: number,
+  history: HistoryMaps,
+): Match[] {
+  const matches: Match[] = [];
+  const pool = shuffle(playing.map((p) => p.id));
+
+  // Greedily assign groups of 4 to courts
+  // Try multiple random shuffles and pick the one with lowest total diversity score
+  let bestMatches: Match[] = [];
+  let bestTotalScore = Infinity;
+  const attempts = Math.min(20, Math.max(5, playing.length));
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const shuffled = attempt === 0 ? pool : shuffle(pool);
+    const candidateMatches: Match[] = [];
+    let totalScore = 0;
+
+    for (let court = 1; court <= courts; court++) {
+      const start = (court - 1) * 4;
+      const group = shuffled.slice(start, start + 4);
+      if (group.length < 4) break;
+
+      const { teamA, teamB } = bestAmericanoPairing(group, history);
+      totalScore += scoreAmericanoPairing(
+        teamA as [string, string],
+        teamB as [string, string],
+        history,
+      );
+
+      candidateMatches.push({
+        id: generateMatchId(),
+        court,
+        teamA: { playerIds: teamA },
+        teamB: { playerIds: teamB },
+        status: "upcoming",
+      });
+    }
+
+    if (totalScore < bestTotalScore) {
+      bestTotalScore = totalScore;
+      bestMatches = candidateMatches;
+    }
+  }
+
+  return bestMatches.length > 0 ? bestMatches : matches;
+}
+
+// ─── Mexicano algorithm ─────────────────────────────────────────────────────
+
+/**
+ * Generate a Mexicano round.
+ * Round 1: random (like Americano).
+ * Round 2+: sort by total points, pair #1 with #4 vs #2 with #3, etc.
+ */
+function generateMexicanoRound(
+  playing: Player[],
+  courts: number,
+  history: HistoryMaps,
+  isFirstRound: boolean,
+): Match[] {
+  if (isFirstRound) {
+    // Round 1: random assignment, same as Americano
+    return generateAmericanoRound(playing, courts, history);
+  }
+
+  // Sort by totalPoints descending
+  const sorted = [...playing].sort((a, b) => {
+    const ptsDiff = b.totalPoints - a.totalPoints;
+    if (ptsDiff !== 0) return ptsDiff;
+    return (b.wins || 0) - (a.wins || 0);
   });
 
-  // Sort by score (lower = higher priority)
-  playerScores.sort((a, b) => a.score - b.score);
+  const matches: Match[] = [];
+  for (let court = 1; court <= courts; court++) {
+    const start = (court - 1) * 4;
+    const group = sorted.slice(start, start + 4);
+    if (group.length < 4) break;
 
-  // Select players for this round
-  const selectedPlayers: Player[] = [];
-  const remainingPlayers = [...playerScores];
-
-  // First pass: select players not in mustSitOut
-  for (const { player } of remainingPlayers) {
-    if (selectedPlayers.length >= playersNeeded) break;
-    if (!mustSitOut.has(player.id)) {
-      selectedPlayers.push(player);
-    }
-  }
-
-  // Second pass: if not enough, fill from mustSitOut (but still prioritize by score)
-  if (selectedPlayers.length < playersNeeded) {
-    for (const { player } of remainingPlayers) {
-      if (selectedPlayers.length >= playersNeeded) break;
-      if (!selectedPlayers.includes(player)) {
-        selectedPlayers.push(player);
-      }
-    }
-  }
-
-  // Determine who sits out
-  const sittingOut = playersToUse
-    .filter((p) => !selectedPlayers.includes(p))
-    .map((p) => p.id);
-
-  // Generate matches for each court with optimal pairings
-  const availablePlayers = [...selectedPlayers];
-  
-  for (let court = 1; court <= courts && availablePlayers.length >= 4; court++) {
-    // Select 4 players for this court, trying to maximize diversity
-    const courtPlayers: Player[] = [];
-    const used = new Set<string>();
-    
-    // Greedy selection: pick players that maximize diversity
-    while (courtPlayers.length < 4 && availablePlayers.length > 0) {
-      let bestPlayer: Player | null = null;
-      let bestScore = Infinity;
-      
-      for (const player of availablePlayers) {
-        if (used.has(player.id)) continue;
-        
-        // Calculate score: prefer players who haven't been on this court
-        let score = 0;
-        const lastCourt = courtHistory.get(player.id);
-        if (lastCourt === court) score += 100; // Heavy penalty for same court
-        
-        // Prefer players who haven't partnered with already selected players
-        for (const selected of courtPlayers) {
-          const partners = partnerHistory.get(player.id);
-          if (partners?.has(selected.id)) {
-            score += 50; // Penalty for repeat partner
-          }
-        }
-        
-        if (score < bestScore) {
-          bestScore = score;
-          bestPlayer = player;
-        }
-      }
-      
-      if (bestPlayer) {
-        courtPlayers.push(bestPlayer);
-        used.add(bestPlayer.id);
-      } else {
-        // Fallback: just take next available
-        const next = availablePlayers.find((p) => !used.has(p.id));
-        if (next) {
-          courtPlayers.push(next);
-          used.add(next.id);
-        } else {
-          break;
-        }
-      }
-    }
-    
-    // Remove selected players from available pool
-    courtPlayers.forEach((p) => {
-      const index = availablePlayers.findIndex((ap) => ap.id === p.id);
-      if (index >= 0) availablePlayers.splice(index, 1);
-    });
-    
-    // Generate optimal pairing
-    const { teamA, teamB } = generateOptimalPairing(
-      courtPlayers,
-      algorithm,
-      partnerHistory,
-      opponentHistory,
-      courtHistory,
-      court
-    );
-
+    // #1 with #4 vs #2 with #3
     matches.push({
       id: generateMatchId(),
       court,
-      teamA: { playerIds: teamA },
-      teamB: { playerIds: teamB },
+      teamA: { playerIds: [group[0].id, group[3].id] },
+      teamB: { playerIds: [group[1].id, group[2].id] },
       status: "upcoming",
     });
   }
 
-  return { matches, sittingOut };
+  return matches;
+}
+
+// ─── Mix Americano algorithm ─────────────────────────────────────────────────
+
+/**
+ * Score a Mix Americano pairing — same as Americano but each team must be 1M + 1F.
+ */
+function scoreMixPairing(
+  teamA: [string, string],
+  teamB: [string, string],
+  history: HistoryMaps,
+): number {
+  return scoreAmericanoPairing(teamA, teamB, history);
+}
+
+/**
+ * Generate a Mix Americano round.
+ * Constraint: every team has exactly 1 M and 1 F.
+ */
+function generateMixAmericanoRound(
+  playing: Player[],
+  courts: number,
+  history: HistoryMaps,
+): Match[] {
+  const males = shuffle(playing.filter((p) => p.gender === "M"));
+  const females = shuffle(playing.filter((p) => p.gender === "F"));
+
+  const matches: Match[] = [];
+
+  // Assign 2M + 2F per court
+  for (let court = 1; court <= courts; court++) {
+    const mStart = (court - 1) * 2;
+    const fStart = (court - 1) * 2;
+    const courtMales = males.slice(mStart, mStart + 2);
+    const courtFemales = females.slice(fStart, fStart + 2);
+
+    if (courtMales.length < 2 || courtFemales.length < 2) {
+      // Not enough of one gender — fall back to best effort
+      const remaining = [
+        ...males.slice(mStart),
+        ...females.slice(fStart),
+      ];
+      if (remaining.length >= 4) {
+        const group = remaining.slice(0, 4);
+        const { teamA, teamB } = bestAmericanoPairing(
+          group.map((p) => p.id),
+          history,
+        );
+        matches.push({
+          id: generateMatchId(),
+          court,
+          teamA: { playerIds: teamA },
+          teamB: { playerIds: teamB },
+          status: "upcoming",
+        });
+      }
+      continue;
+    }
+
+    // Try all 2 ways to pair M+F into teams: (M0F0 vs M1F1) or (M0F1 vs M1F0)
+    const m = courtMales.map((p) => p.id);
+    const f = courtFemales.map((p) => p.id);
+
+    const option1: { teamA: [string, string]; teamB: [string, string] } = {
+      teamA: [m[0], f[0]],
+      teamB: [m[1], f[1]],
+    };
+    const option2: { teamA: [string, string]; teamB: [string, string] } = {
+      teamA: [m[0], f[1]],
+      teamB: [m[1], f[0]],
+    };
+
+    const s1 = scoreMixPairing(option1.teamA, option1.teamB, history);
+    const s2 = scoreMixPairing(option2.teamA, option2.teamB, history);
+
+    const best = s1 <= s2 ? option1 : option2;
+
+    matches.push({
+      id: generateMatchId(),
+      court,
+      teamA: { playerIds: best.teamA },
+      teamB: { playerIds: best.teamB },
+      status: "upcoming",
+    });
+  }
+
+  return matches;
+}
+
+// ─── Skill Americano algorithm ───────────────────────────────────────────────
+
+/**
+ * Score a Skill Americano pairing.
+ * Partner diversity is primary; skill balance is secondary tiebreaker.
+ */
+function scoreSkillPairing(
+  teamA: [string, string],
+  teamB: [string, string],
+  playerMap: Map<string, Player>,
+  history: HistoryMaps,
+): number {
+  // Base diversity score (same as Americano)
+  let score = scoreAmericanoPairing(teamA, teamB, history);
+
+  // Skill balance penalty (secondary — multiplied by small factor)
+  const skillA = (playerMap.get(teamA[0])?.skill || 3) + (playerMap.get(teamA[1])?.skill || 3);
+  const skillB = (playerMap.get(teamB[0])?.skill || 3) + (playerMap.get(teamB[1])?.skill || 3);
+  const gap = Math.abs(skillA - skillB);
+  score += gap * 2; // Small weight: don't repeat partners just to balance
+
+  return score;
+}
+
+/**
+ * Generate a Skill Americano round.
+ * Same diversity logic as Americano, but also minimizes skill gap between teams.
+ */
+function generateSkillAmericanoRound(
+  playing: Player[],
+  courts: number,
+  history: HistoryMaps,
+): Match[] {
+  const playerMap = new Map(playing.map((p) => [p.id, p]));
+  const matches: Match[] = [];
+  const pool = shuffle(playing.map((p) => p.id));
+
+  let bestMatches: Match[] = [];
+  let bestTotalScore = Infinity;
+  const attempts = Math.min(30, Math.max(10, playing.length * 2));
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const shuffled = attempt === 0 ? pool : shuffle(pool);
+    const candidateMatches: Match[] = [];
+    let totalScore = 0;
+
+    for (let court = 1; court <= courts; court++) {
+      const start = (court - 1) * 4;
+      const group = shuffled.slice(start, start + 4);
+      if (group.length < 4) break;
+
+      // Try all 3 splits, pick best skill-balanced one
+      const [a, b, c, d] = group;
+      const splits: [string, string, string, string][] = [
+        [a, b, c, d],
+        [a, c, b, d],
+        [a, d, b, c],
+      ];
+
+      let bestSplit = { teamA: [a, b], teamB: [c, d] };
+      let bestSplitScore = Infinity;
+
+      for (const [x1, x2, y1, y2] of splits) {
+        const s = scoreSkillPairing([x1, x2], [y1, y2], playerMap, history);
+        if (s < bestSplitScore) {
+          bestSplitScore = s;
+          bestSplit = { teamA: [x1, x2], teamB: [y1, y2] };
+        }
+      }
+
+      totalScore += bestSplitScore;
+      candidateMatches.push({
+        id: generateMatchId(),
+        court,
+        teamA: { playerIds: bestSplit.teamA },
+        teamB: { playerIds: bestSplit.teamB },
+        status: "upcoming",
+      });
+    }
+
+    if (totalScore < bestTotalScore) {
+      bestTotalScore = totalScore;
+      bestMatches = candidateMatches;
+    }
+  }
+
+  return bestMatches.length > 0 ? bestMatches : matches;
+}
+
+// ─── Mix Americano player selection override ─────────────────────────────────
+
+/**
+ * For Mix Americano, select players respecting gender constraints:
+ * each court needs 2M + 2F. Minority gender sits out less.
+ */
+function selectPlayersForMixRound(
+  players: Player[],
+  courts: number,
+  history: HistoryMaps,
+): { playing: Player[]; sittingOut: string[] } {
+  const active = players.filter((p) => p.status === "active");
+  const males = active.filter((p) => p.gender === "M");
+  const females = active.filter((p) => p.gender === "F");
+
+  const malesNeeded = courts * 2;
+  const femalesNeeded = courts * 2;
+
+  // Sort each gender group by fewest games first (fair rotation)
+  const sortByPriority = (arr: Player[]) =>
+    [...arr].sort((a, b) => {
+      const gDiff = a.gamesPlayed - b.gamesPlayed;
+      if (gDiff !== 0) return gDiff;
+      return (history.sitOutCounts.get(b.id) || 0) - (history.sitOutCounts.get(a.id) || 0);
+    });
+
+  const sortedMales = sortByPriority(males);
+  const sortedFemales = sortByPriority(females);
+
+  const playingMales = sortedMales.slice(0, malesNeeded);
+  const playingFemales = sortedFemales.slice(0, femalesNeeded);
+  const playing = [...playingMales, ...playingFemales];
+
+  const playingIds = new Set(playing.map((p) => p.id));
+  const sittingOut = active.filter((p) => !playingIds.has(p.id)).map((p) => p.id);
+
+  return { playing, sittingOut };
+}
+
+// ─── Public API ──────────────────────────────────────────────────────────────
+
+/**
+ * Generate matchups for a single round.
+ */
+export function generateRoundMatchups(
+  players: Player[],
+  courts: number,
+  algorithm: Algorithm,
+  previousRounds: Round[] = [],
+  currentRound: number = 1,
+): { matches: Match[]; sittingOut: string[] } {
+  const active = players.filter((p) => p.status === "active");
+
+  if (active.length < 4) {
+    return { matches: [], sittingOut: active.map((p) => p.id) };
+  }
+
+  const history = buildHistory(players, previousRounds);
+
+  // Select who plays and who sits out
+  let playing: Player[];
+  let sittingOut: string[];
+
+  if (algorithm === "mix_americano") {
+    ({ playing, sittingOut } = selectPlayersForMixRound(players, courts, history));
+  } else {
+    ({ playing, sittingOut } = selectPlayersForRound(players, courts, history));
+  }
+
+  if (playing.length < 4) {
+    return { matches: [], sittingOut: active.map((p) => p.id) };
+  }
+
+  // Generate matches based on algorithm
+  let matches: Match[];
+  const isFirstRound = previousRounds.length === 0;
+
+  switch (algorithm) {
+    case "americano":
+      matches = generateAmericanoRound(playing, courts, history);
+      break;
+    case "mexicano":
+      matches = generateMexicanoRound(playing, courts, history, isFirstRound);
+      break;
+    case "mix_americano":
+      matches = generateMixAmericanoRound(playing, courts, history);
+      break;
+    case "skill_americano":
+      matches = generateSkillAmericanoRound(playing, courts, history);
+      break;
+    default:
+      matches = generateAmericanoRound(playing, courts, history);
+  }
+
+  // Recompute sittingOut based on who actually got assigned a match
+  const inMatch = new Set(matches.flatMap((m) => [...m.teamA.playerIds, ...m.teamB.playerIds]));
+  const finalSittingOut = active.filter((p) => !inMatch.has(p.id)).map((p) => p.id);
+
+  return { matches, sittingOut: finalSittingOut };
 }
 
 /**
@@ -399,70 +589,177 @@ function isRoundCompleted(round: Round): boolean {
 }
 
 /**
- * Generate full schedule for all rounds
- * Only regenerates FUTURE rounds, preserving completed rounds
- * Never mutates completed rounds - they are immutable
+ * Generate full schedule for all rounds.
+ * For Mexicano, only round 1 can be pre-generated; future rounds are placeholders.
  */
 export function generateSchedule(
   players: Player[],
   config: { courts: number; rounds: number; algorithm: Algorithm },
   existingSchedule: Round[] = [],
-  fromRound: number = 1
+  fromRound: number = 1,
 ): Round[] {
-  const schedule: Round[] = [];
   const preservedRounds: Round[] = [];
 
-  // Preserve rounds before fromRound (definitely past/completed)
-  // Also preserve rounds >= fromRound that are fully completed
+  // Preserve rounds before fromRound or already completed
   existingSchedule.forEach((round) => {
     if (round.roundNumber < fromRound || isRoundCompleted(round)) {
       preservedRounds.push(round);
     }
   });
 
-  // Sort preserved rounds for context
   preservedRounds.sort((a, b) => a.roundNumber - b.roundNumber);
 
-  // Determine which rounds need to be generated
-  const existingRoundNumbers = new Set(existingSchedule.map((r) => r.roundNumber));
-  
-  // Generate rounds from fromRound to config.rounds
+  const schedule: Round[] = [];
+
   for (let roundNum = fromRound; roundNum <= config.rounds; roundNum++) {
-    // Skip if this round is already preserved (completed)
+    // Skip if already preserved (completed)
     if (preservedRounds.some((r) => r.roundNumber === roundNum)) {
       continue;
     }
 
-    // Generate this round using all previous rounds (preserved + newly generated) as context
+    // For Mexicano round 2+: only generate if previous round is completed
+    // (during schedule generation we can generate all upfront since we have the data)
+    // But for future rounds that haven't been played yet, generate using current standings
+    const allPrior = preservedRounds.concat(schedule);
+
     const { matches, sittingOut } = generateRoundMatchups(
       players,
       config.courts,
       config.algorithm,
-      preservedRounds.concat(schedule),
-      roundNum
+      allPrior,
+      roundNum,
     );
 
-    schedule.push({
-      roundNumber: roundNum,
-      matches,
-      sittingOut,
-    });
+    schedule.push({ roundNumber: roundNum, matches, sittingOut });
   }
 
-  // Merge: preserved rounds + newly generated rounds, sorted by round number
-  const allRounds = [...preservedRounds, ...schedule].sort((a, b) => a.roundNumber - b.roundNumber);
-  return allRounds;
+  return [...preservedRounds, ...schedule].sort((a, b) => a.roundNumber - b.roundNumber);
 }
 
 /**
- * Regenerate schedule when players are added/removed mid-session
- * Only regenerates FUTURE rounds
+ * Regenerate schedule when players change mid-session.
+ * Only regenerates from currentRound onward, preserving completed rounds.
  */
 export function regenerateSchedule(
   players: Player[],
   config: { courts: number; rounds: number; algorithm: Algorithm },
   existingSchedule: Round[],
-  currentRound: number
+  currentRound: number,
 ): Round[] {
   return generateSchedule(players, config, existingSchedule, currentRound);
+}
+
+/**
+ * Reshuffle a single court's match using the active algorithm.
+ * Returns a new match for the given court, using the algorithm's pairing logic.
+ */
+export function reshuffleMatch(
+  players: Player[],
+  algorithm: Algorithm,
+  pool: Player[],
+  court: number,
+  previousRounds: Round[],
+): Match | null {
+  if (pool.length < 4) return null;
+
+  const history = buildHistory(players, previousRounds);
+  const fourPlayers = pool.slice(0, 4);
+
+  let teamA: string[];
+  let teamB: string[];
+
+  switch (algorithm) {
+    case "americano": {
+      const pairing = bestAmericanoPairing(fourPlayers.map((p) => p.id), history);
+      teamA = pairing.teamA;
+      teamB = pairing.teamB;
+      break;
+    }
+    case "mexicano": {
+      // Mexicano reshuffle: use standings-based pairing
+      const sorted = [...fourPlayers].sort((a, b) => b.totalPoints - a.totalPoints);
+      teamA = [sorted[0].id, sorted[3].id];
+      teamB = [sorted[1].id, sorted[2].id];
+      break;
+    }
+    case "mix_americano": {
+      const males = fourPlayers.filter((p) => p.gender === "M");
+      const females = fourPlayers.filter((p) => p.gender === "F");
+      if (males.length >= 2 && females.length >= 2) {
+        // Proper mix pairing
+        const option1 = { teamA: [males[0].id, females[0].id] as [string, string], teamB: [males[1].id, females[1].id] as [string, string] };
+        const option2 = { teamA: [males[0].id, females[1].id] as [string, string], teamB: [males[1].id, females[0].id] as [string, string] };
+        const s1 = scoreMixPairing(option1.teamA, option1.teamB, history);
+        const s2 = scoreMixPairing(option2.teamA, option2.teamB, history);
+        const best = s1 <= s2 ? option1 : option2;
+        teamA = best.teamA;
+        teamB = best.teamB;
+      } else {
+        // Fallback: best americano pairing
+        const pairing = bestAmericanoPairing(fourPlayers.map((p) => p.id), history);
+        teamA = pairing.teamA;
+        teamB = pairing.teamB;
+      }
+      break;
+    }
+    case "skill_americano": {
+      const playerMap = new Map(fourPlayers.map((p) => [p.id, p]));
+      const ids = fourPlayers.map((p) => p.id);
+      const [a, b, c, d] = ids;
+      const splits: [string, string, string, string][] = [
+        [a, b, c, d], [a, c, b, d], [a, d, b, c],
+      ];
+      let best = { teamA: [a, b], teamB: [c, d] };
+      let bestScore = Infinity;
+      for (const [x1, x2, y1, y2] of splits) {
+        const s = scoreSkillPairing([x1, x2], [y1, y2], playerMap, history);
+        if (s < bestScore) {
+          bestScore = s;
+          best = { teamA: [x1, x2], teamB: [y1, y2] };
+        }
+      }
+      teamA = best.teamA;
+      teamB = best.teamB;
+      break;
+    }
+    default: {
+      const pairing = bestAmericanoPairing(fourPlayers.map((p) => p.id), history);
+      teamA = pairing.teamA;
+      teamB = pairing.teamB;
+    }
+  }
+
+  return {
+    id: generateMatchId(),
+    court,
+    teamA: { playerIds: teamA },
+    teamB: { playerIds: teamB },
+    status: "upcoming",
+  };
+}
+
+/**
+ * Validate Mix Americano requirements.
+ * Returns null if valid, or an error string if not.
+ */
+export function validateMixAmericano(players: Player[]): string | null {
+  const active = players.filter((p) => p.status === "active");
+  const males = active.filter((p) => p.gender === "M");
+  const females = active.filter((p) => p.gender === "F");
+
+  if (males.length < 2) return `Need at least 2 male players (have ${males.length})`;
+  if (females.length < 2) return `Need at least 2 female players (have ${females.length})`;
+  return null;
+}
+
+/**
+ * For Mexicano: check if a future round should show placeholder text.
+ * Returns true if the round can't be pre-generated because previous results aren't in.
+ */
+export function isMexicanoFutureRound(algorithm: Algorithm, roundNumber: number, completedRounds: Round[]): boolean {
+  if (algorithm !== "mexicano") return false;
+  if (roundNumber <= 1) return false;
+  // Check if the previous round is completed
+  const prevRound = completedRounds.find((r) => r.roundNumber === roundNumber - 1);
+  return !prevRound || !isRoundCompleted(prevRound);
 }
